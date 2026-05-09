@@ -80,7 +80,9 @@ class TestGesetzImInternetProvider:
         p = GesetzImInternetProvider()
         assert p.is_available("BGB")
         assert p.is_available("bgb")
-        assert not p.is_available("STGB")
+        # STGB is in _LAW_CATALOG so it is available; check a truly unknown code
+        assert p.is_available("STGB")
+        assert not p.is_available("UNKNOWN_LAW_XYZ")
 
     def test_name(self):
         p = GesetzImInternetProvider()
