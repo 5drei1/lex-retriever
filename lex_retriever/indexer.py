@@ -69,13 +69,18 @@ def _write_stored_provider(provider_id: str) -> None:
 def _get_collection(embedding_config: dict | None = None, force: bool = False):
     client = chromadb.PersistentClient(path=CHROMA_PATH)
     ef = get_chroma_embedding_function(embedding_config)
+    collection_metadata = {"hnsw:space": "cosine"}
     try:
-        return client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=ef)
+        return client.get_or_create_collection(
+            name=COLLECTION_NAME, embedding_function=ef, metadata=collection_metadata
+        )
     except ValueError as exc:
         if "Embedding function conflict" in str(exc) and force:
             # Provider changed with --force: drop the whole collection and start fresh.
             client.delete_collection(name=COLLECTION_NAME)
-            return client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=ef)
+            return client.get_or_create_collection(
+                name=COLLECTION_NAME, embedding_function=ef, metadata=collection_metadata
+            )
         raise
 
 

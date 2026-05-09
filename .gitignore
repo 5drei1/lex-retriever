@@ -1,6 +1,5 @@
-# ChromaDB — exclude contents but keep the placeholder
-chroma_db/*
-!chroma_db/.gitkeep
+# ChromaDB — populated locally by `python -m lex_retriever index-all`
+chroma_db/
 
 # Local config (copy from lex_retriever.toml.example to create your own)
 lex_retriever.toml
