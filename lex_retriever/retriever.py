@@ -82,3 +82,49 @@ def search(
         }
         for i in range(len(docs))
     ]
+
+
+def get_full_law(law: str, offset: int = 0, limit: int = 50, embedding_config: dict | None = None) -> dict:
+    """Return paginated paragraphs of a complete law.
+
+    Args:
+        law:    Law code e.g. "AGG"
+        offset: Paragraph offset for pagination
+        limit:  Number of paragraphs per page (default 50)
+
+    Returns:
+        {
+          "law": str,
+          "total_paragraphs": int,
+          "offset": int,
+          "paragraphs": [{ "paragraph": str, "text": str }]
+        }
+    """
+    from collections import defaultdict
+
+    collection = _get_collection(embedding_config)
+    result = collection.get(
+        where={"law": law.upper()},
+        include=["documents", "metadatas"],
+    )
+
+    paragraph_chunks: dict[str, list[tuple[dict, str]]] = defaultdict(list)
+    for meta, doc in zip(result["metadatas"], result["documents"]):
+        paragraph_chunks[meta["paragraph"]].append((meta, doc))
+
+    sorted_paragraphs = sorted(paragraph_chunks.keys())
+    total = len(sorted_paragraphs)
+    page = sorted_paragraphs[offset : offset + limit]
+
+    paragraphs = []
+    for para_key in page:
+        chunks = sorted(paragraph_chunks[para_key], key=lambda x: x[0].get("paragraph", ""))
+        text = " ".join(doc for _, doc in chunks)
+        paragraphs.append({"paragraph": para_key, "text": text})
+
+    return {
+        "law": law.upper(),
+        "total_paragraphs": total,
+        "offset": offset,
+        "paragraphs": paragraphs,
+    }
