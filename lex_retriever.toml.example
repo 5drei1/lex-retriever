@@ -1,0 +1,19 @@
+# lex_retriever.toml.example
+# Copy to lex_retriever.toml and adjust to your installation.
+# Run `python -m lex_retriever list-available` for all available law codes.
+
+[database]
+# Path to ChromaDB persistence directory (default: ./chroma_db)
+path = "./chroma_db"
+
+[laws]
+# Laws to include in this installation.
+# `index-all` will only index these; omit this section for the default set.
+active = [
+    "BGB",
+    "HGB",
+    "GMBHG",
+    "DSGVO",
+    "STGB",
+    "ZPO",
+]

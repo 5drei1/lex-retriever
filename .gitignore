@@ -2,6 +2,9 @@
 chroma_db/*
 !chroma_db/.gitkeep
 
+# Local config (copy from lex_retriever.toml.example to create your own)
+lex_retriever.toml
+
 # Python
 __pycache__/
 *.pyc

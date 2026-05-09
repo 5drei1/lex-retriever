@@ -13,6 +13,8 @@
 
 ## Supported Laws & Sources
 
+### Default active laws (indexed by `index-all` without config)
+
 | Law | Full Name | Source Website | Provider |
 |---|---|---|---|
 | BGB | Bürgerliches Gesetzbuch | [gesetze-im-internet.de](https://www.gesetze-im-internet.de/bgb/) | GesetzImInternetProvider |
@@ -22,10 +24,17 @@
 | BDSG_2018 | Bundesdatenschutzgesetz | [gesetze-im-internet.de](https://www.gesetze-im-internet.de/bdsg_2018/) | GesetzImInternetProvider |
 | DSGVO | Datenschutz-Grundverordnung (EU) | [eur-lex.europa.eu](https://eur-lex.europa.eu/legal-content/DE/TXT/?uri=CELEX:32016R0679) | EurLexProvider |
 
-> **See which laws are available at any time:**
-> ```bash
-> python -m lex_retriever list-laws
-> ```
+### Additional laws available for indexing (no code changes needed)
+
+38 more German laws are catalogued and can be indexed on demand: StGB, ZPO, InsO, AktG, AGG, EStG, UrhG, GG, VwGO, VwVfG, KSchG, BetrVG, TzBfG, ArbZG, BUrlG, MuSchG, SGB I/II/V, StPO, JGG, GVG, StVG, UStG, WpHG, PatG, MarkenG, and more.
+
+```bash
+# See all downloadable laws grouped by provider
+python -m lex_retriever list-available
+
+# Index any law on demand
+python -m lex_retriever index StGB
+```
 
 ---
 
@@ -60,21 +69,42 @@ for r in search_law('Haftung bei Vertragsverletzung', top_k=3):
 ## CLI Reference
 
 ```
-python -m lex_retriever index-all [--force]    # index all supported laws
-python -m lex_retriever index <LAW_CODE> [--force]   # index a single law
-python -m lex_retriever list-laws              # list all available laws
+python -m lex_retriever index-all [--force]          # index active/default laws
+python -m lex_retriever index <LAW_CODE> [--force]   # index a specific law
+python -m lex_retriever list-laws                    # list default configured laws
+python -m lex_retriever list-available               # list ALL downloadable laws
+python -m lex_retriever status                       # show local DB state
 ```
 
-Example output of `list-laws`:
+### `list-available` — all downloadable laws per provider
 
 ```
-Available laws across all providers:
-  - BGB
-  - HGB
-  - GMBHG
-  - GEWO
-  - BDSG_2018
-  - DSGVO
+[gesetze-im-internet]
+  AKTG           Aktiengesetz                                        ✗ not indexed
+  AGG            Allgemeines Gleichbehandlungsgesetz                 ✗ not indexed
+  BGB            Bürgerliches Gesetzbuch                            ✓ indexed
+  BDSG_2018      Bundesdatenschutzgesetz                            ✓ indexed
+  ...
+
+[eur-lex]
+  DSGVO          Datenschutz-Grundverordnung (EU 2016/679)          ✓ indexed
+
+Run: python -m lex_retriever index <LAW_CODE> to add a law to your DB.
+```
+
+### `status` — local DB overview
+
+```
+Local DB: ./chroma_db
+Indexed laws: 5
+  ✓ BGB            (3,098 chunks)
+  ✓ HGB            (1,178 chunks)
+  ✓ GMBHG          (163 chunks)
+  ✓ GEWO           (387 chunks)
+  ✓ DSGVO          (211 chunks)
+
+Available but not indexed: 34 laws
+Run `python -m lex_retriever list-available` to see all available laws.
 ```
 
 ---
@@ -208,9 +238,36 @@ index_all_laws()             # index ALL laws from ALL providers
 
 ## Configuration
 
+### `lex_retriever.toml` (optional)
+
+Place `lex_retriever.toml` in your working directory to control which laws are active and where the DB is stored. Copy `lex_retriever.toml.example` to get started:
+
+```toml
+[database]
+path = "./chroma_db"
+
+[laws]
+# Only these laws will be indexed by `index-all`.
+# Run `list-available` for all valid codes.
+active = [
+    "BGB",
+    "HGB",
+    "GMBHG",
+    "DSGVO",
+    "STGB",
+]
+```
+
+Without a config file the default set (BGB, HGB, GmbHG, GewO, BDSG_2018) is used by `index-all`. Individual laws can always be indexed on demand with `index <LAW_CODE>` regardless of the config.
+
+The `lex_retriever.toml` file is listed in `.gitignore` and is not committed to the repo.
+
+### Environment variables
+
 | Env var | Default | Description |
 |---|---|---|
 | CHROMA_PATH | ./chroma_db | Path to ChromaDB persistence directory |
+| LEX_CONFIG | lex_retriever.toml | Path to TOML config file |
 
 ---
 

@@ -61,11 +61,26 @@ def _parse_cellar_xhtml(html: str, law_code: str) -> list[dict]:
     return chunks
 
 
+_FULL_NAMES = {
+    "DSGVO": "Datenschutz-Grundverordnung (EU 2016/679)",
+}
+
+
 class EurLexProvider(LawProvider):
     """Fetches EU regulations from the EU Publications Office Cellar (German XHTML)."""
 
     name = "eur-lex"
     supported_laws = list(_LAW_CELLAR_URLS.keys())
+
+    def available_laws(self) -> list[dict]:
+        return [
+            {
+                "code": code,
+                "full_name": _FULL_NAMES.get(code, code),
+                "url": url,
+            }
+            for code, url in sorted(_LAW_CELLAR_URLS.items())
+        ]
 
     def fetch(self, law_code: str) -> list[dict]:
         url = _LAW_CELLAR_URLS.get(law_code.upper())

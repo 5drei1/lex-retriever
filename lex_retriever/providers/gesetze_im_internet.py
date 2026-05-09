@@ -7,17 +7,67 @@ import requests
 
 from .base import LawProvider
 
-# Map of known law codes to their gesetze-im-internet.de XML-ZIP paths
-_LAW_URLS = {
-    "BGB": "https://www.gesetze-im-internet.de/bgb/xml.zip",
-    "HGB": "https://www.gesetze-im-internet.de/hgb/xml.zip",
-    "GMBHG": "https://www.gesetze-im-internet.de/gmbhg/xml.zip",
-    "GEWO": "https://www.gesetze-im-internet.de/gewo/xml.zip",
-    "BDSG_2018": "https://www.gesetze-im-internet.de/bdsg_2018/xml.zip",
+# Comprehensive catalog: CODE -> (full_name, slug)
+# Slug determines the XML-ZIP URL: https://www.gesetze-im-internet.de/{slug}/xml.zip
+_LAW_CATALOG: dict[str, tuple[str, str]] = {
+    # Civil & Commercial Law
+    "BGB":       ("Bürgerliches Gesetzbuch",                           "bgb"),
+    "HGB":       ("Handelsgesetzbuch",                                  "hgb"),
+    "GMBHG":     ("GmbH-Gesetz",                                        "gmbhg"),
+    "AKTG":      ("Aktiengesetz",                                       "aktg"),
+    "GEWO":      ("Gewerbeordnung",                                     "gewo"),
+    "INSO":      ("Insolvenzordnung",                                   "inso"),
+    "URHG":      ("Urheberrechtsgesetz",                                "urhg"),
+    "UMWG":      ("Umwandlungsgesetz",                                  "umwg"),
+    "WPHG":      ("Wertpapierhandelsgesetz",                            "wphg"),
+    "PATG":      ("Patentgesetz",                                       "patg"),
+    "MARKENG":   ("Markengesetz",                                       "markeng"),
+    "WBVG":      ("Wohn- und Betreuungsvertragsgesetz",                 "wbvg"),
+    # Data Protection & Media
+    "BDSG_2018": ("Bundesdatenschutzgesetz",                            "bdsg_2018"),
+    "TMG":       ("Telemediengesetz",                                   "tmg"),
+    # Criminal Law
+    "STGB":      ("Strafgesetzbuch",                                    "stgb"),
+    "STPO":      ("Strafprozessordnung",                                "stpo"),
+    "JGG":       ("Jugendgerichtsgesetz",                               "jgg"),
+    # Procedural Law
+    "ZPO":       ("Zivilprozessordnung",                                "zpo"),
+    "GVG":       ("Gerichtsverfassungsgesetz",                          "gvg"),
+    "VWGO":      ("Verwaltungsgerichtsordnung",                         "vwgo"),
+    "FGO":       ("Finanzgerichtsordnung",                              "fgo"),
+    "ARBGG":     ("Arbeitsgerichtsgesetz",                              "arbgg"),
+    # Constitutional & Administrative Law
+    "GG":        ("Grundgesetz",                                        "gg"),
+    "VWVFG":     ("Verwaltungsverfahrensgesetz",                        "vwvfg"),
+    # Labor Law
+    "AGG":       ("Allgemeines Gleichbehandlungsgesetz",                "agg"),
+    "KSCHG":     ("Kündigungsschutzgesetz",                             "kschg"),
+    "TZBFG":     ("Teilzeit- und Befristungsgesetz",                    "tzbfg"),
+    "BETRVG":    ("Betriebsverfassungsgesetz",                          "betrvg"),
+    "ARBZG":     ("Arbeitszeitgesetz",                                  "arbzg"),
+    "BURLG":     ("Bundesurlaubsgesetz",                                "burlg"),
+    "MUSCHG":    ("Mutterschutzgesetz",                                 "muschg"),
+    "JARBSCHG":  ("Jugendarbeitsschutzgesetz",                          "jarbschg"),
+    # Social Law
+    "SGB_1":     ("Sozialgesetzbuch Erstes Buch",                       "sgb_1"),
+    "SGB_2":     ("Sozialgesetzbuch Zweites Buch (Bürgergeld)",         "sgb_2"),
+    "SGB_5":     ("Sozialgesetzbuch Fünftes Buch (Krankenversicherung)","sgb_5"),
+    # Traffic Law
+    "STVG":      ("Straßenverkehrsgesetz",                              "stvg"),
+    # Tax Law
+    "ESTG":      ("Einkommensteuergesetz",                              "estg"),
+    "USTG":      ("Umsatzsteuergesetz",                                 "ustg"),
 }
+
+# Laws active by default (used when no lex_retriever.toml present)
+_DEFAULT_ACTIVE = ["BGB", "HGB", "GMBHG", "GEWO", "BDSG_2018"]
 
 # Namespace used in GII XML files
 _NS = {"ns": "http://www.juris.de/jportal/namespace/types/de/documentTypes/norm/1.0.0"}
+
+
+def _xml_zip_url(slug: str) -> str:
+    return f"https://www.gesetze-im-internet.de/{slug}/xml.zip"
 
 
 def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
@@ -28,17 +78,14 @@ def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
         return []
 
     chunks = []
-    # GII XML: each <norm> contains <metadaten> (metadata) and <textdaten> (content)
     for norm in root.findall(".//norm", _NS):
         enbez = norm.findtext("metadaten/enbez", default="", namespaces=_NS) or ""
         titel = norm.findtext("metadaten/titel", default="", namespaces=_NS) or ""
 
-        # Extract paragraph identifier
         paragraph = enbez.strip()
         if titel:
             paragraph = f"{paragraph} ({titel.strip()})" if paragraph else titel.strip()
 
-        # Collect all text content from <Content> nodes
         text_parts = []
         for content in norm.findall(".//Content", _NS):
             if content.text:
@@ -50,7 +97,6 @@ def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
                 text_parts.append(elem.tail.strip())
 
         text = " ".join(text_parts).strip()
-        # Fallback: get all text in the norm element
         if not text:
             text = " ".join(norm.itertext()).strip()
             text = re.sub(r"\s+", " ", text)
@@ -69,13 +115,25 @@ class GesetzImInternetProvider(LawProvider):
     """Fetches German laws from gesetze-im-internet.de as XML-ZIP archives."""
 
     name = "gesetze-im-internet"
-    supported_laws = list(_LAW_URLS.keys())
+    supported_laws = _DEFAULT_ACTIVE
+
+    def available_laws(self) -> list[dict]:
+        return [
+            {"code": code, "full_name": name, "url": _xml_zip_url(slug)}
+            for code, (name, slug) in sorted(_LAW_CATALOG.items())
+        ]
+
+    def is_available(self, law_code: str) -> bool:
+        return law_code.upper() in _LAW_CATALOG
 
     def fetch(self, law_code: str) -> list[dict]:
-        url = _LAW_URLS.get(law_code.upper())
-        if not url:
-            raise ValueError(f"Law '{law_code}' not supported by {self.name}")
+        code = law_code.upper()
+        entry = _LAW_CATALOG.get(code)
+        if not entry:
+            raise ValueError(f"Law '{law_code}' not in catalog for {self.name}")
 
+        _, slug = entry
+        url = _xml_zip_url(slug)
         response = requests.get(url, timeout=30)
         response.raise_for_status()
 
@@ -84,6 +142,6 @@ class GesetzImInternetProvider(LawProvider):
             for name in zf.namelist():
                 if name.endswith(".xml"):
                     with zf.open(name) as f:
-                        chunks.extend(_parse_gii_xml(f.read(), law_code.upper()))
+                        chunks.extend(_parse_gii_xml(f.read(), code))
 
         return chunks

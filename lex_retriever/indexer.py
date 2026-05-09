@@ -70,20 +70,34 @@ def index_law(law_code: str, force: bool = False) -> int:
     return len(chunks)
 
 
-def index_all_laws(force: bool = False) -> dict[str, int]:
-    """Index ALL laws from ALL registered providers.
-
-    No code changes needed to pick up new laws —
-    simply register a new LawProvider in providers/__init__.py.
+def index_all_laws(force: bool = False, law_codes: list[str] | None = None) -> dict[str, int]:
+    """Index laws from all registered providers.
 
     Args:
-        force: Re-index even if laws are already present
+        force:      Re-index even if laws are already present
+        law_codes:  Explicit list of law codes to index; defaults to all supported laws
 
     Returns:
         Dict mapping law code to number of chunks indexed (0 = already up to date)
     """
-    from .providers import all_supported_laws
+    if law_codes is None:
+        from .providers import all_supported_laws
+        law_codes = all_supported_laws()
     results = {}
-    for law_code in all_supported_laws():
+    for law_code in law_codes:
         results[law_code] = index_law(law_code, force=force)
     return results
+
+
+def get_indexed_law_counts() -> dict[str, int]:
+    """Return {law_code: chunk_count} for every law currently in the DB."""
+    try:
+        collection = _get_collection()
+        result = collection.get(include=["metadatas"])
+        counts: dict[str, int] = {}
+        for meta in result["metadatas"]:
+            law = meta.get("law", "UNKNOWN")
+            counts[law] = counts.get(law, 0) + 1
+        return counts
+    except Exception:
+        return {}
