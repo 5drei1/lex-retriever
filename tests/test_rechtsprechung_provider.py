@@ -1,6 +1,7 @@
 """Tests for rechtsprechung-im-internet.de provider."""
 
 import io
+import os
 import zipfile
 from unittest.mock import MagicMock, call, patch
 
@@ -273,3 +274,80 @@ class TestRechtsprechungImInternetProvider:
         required = {"court", "date", "az", "type", "text", "chunk_type", "laws_cited", "url"}
         for chunk in chunks:
             assert required.issubset(chunk.keys())
+
+
+class TestFixtureFile:
+    """Parse a real fixture XML file from tests/fixtures/bgh_sample.xml."""
+
+    def _fixture_path(self) -> str:
+        return os.path.join(os.path.dirname(__file__), "fixtures", "bgh_sample.xml")
+
+    def test_fixture_file_exists(self):
+        assert os.path.exists(self._fixture_path())
+
+    def test_parse_fixture_extracts_required_fields(self):
+        with open(self._fixture_path(), "rb") as f:
+            xml_bytes = f.read()
+        chunks = _parse_xml_file(xml_bytes, "bgh_sample.xml")
+        assert chunks, "Expected at least one chunk from fixture"
+        for chunk in chunks:
+            assert chunk.get("court"), "court is missing or empty"
+            assert chunk.get("date"), "date is missing or empty"
+            assert chunk.get("az"), "az is missing or empty"
+            assert chunk.get("type"), "type is missing or empty"
+            assert chunk.get("text"), "text is missing or empty"
+            assert "laws_cited" in chunk
+
+    def test_fixture_court_is_bgh(self):
+        with open(self._fixture_path(), "rb") as f:
+            xml_bytes = f.read()
+        chunks = _parse_xml_file(xml_bytes, "bgh_sample.xml")
+        assert chunks
+        assert chunks[0]["court"] == "Bundesgerichtshof"
+
+    def test_fixture_laws_cited_populated(self):
+        with open(self._fixture_path(), "rb") as f:
+            xml_bytes = f.read()
+        chunks = _parse_xml_file(xml_bytes, "bgh_sample.xml")
+        all_laws = [law for c in chunks for law in c.get("laws_cited", [])]
+        assert all_laws, "Expected at least one law cited from fixture"
+
+
+class TestRetryLogic:
+    """Verify that fetch_court_xml_zip retries on transient request errors."""
+
+    def _make_success_response(self) -> MagicMock:
+        zip_bytes = _make_zip(("case.xml", SAMPLE_XML))
+        resp = MagicMock()
+        resp.content = zip_bytes
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    def test_retries_on_connection_error_then_succeeds(self):
+        import requests as req
+
+        success_resp = self._make_success_response()
+        side_effects = [
+            req.exceptions.ConnectionError("connection refused"),
+            req.exceptions.ConnectionError("connection refused"),
+            success_resp,
+        ]
+
+        with patch(
+            "lex_cases.providers.rechtsprechung_im_internet.requests.get",
+            side_effect=side_effects,
+        ) as mock_get:
+            chunks = fetch_court_xml_zip("BGH")
+
+        assert mock_get.call_count == 3
+        assert len(chunks) > 0
+
+    def test_raises_after_exhausting_retries(self):
+        import requests as req
+
+        with patch(
+            "lex_cases.providers.rechtsprechung_im_internet.requests.get",
+            side_effect=req.exceptions.ConnectionError("persistent failure"),
+        ):
+            with pytest.raises(req.exceptions.ConnectionError):
+                fetch_court_xml_zip("BAG")
