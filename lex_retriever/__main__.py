@@ -14,6 +14,7 @@ def _load_config() -> dict:
 
 
 def main():
+    """Entry point for the lex-retriever CLI (python -m lex_retriever <command>)."""
     config = _load_config()
     active_laws: list[str] | None = config.get("laws", {}).get("active")
     db_path: str | None = config.get("database", {}).get("path")
