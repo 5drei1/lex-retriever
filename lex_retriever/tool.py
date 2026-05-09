@@ -10,7 +10,7 @@ import os
 import tomllib
 from pathlib import Path
 
-from .retriever import search as _search
+from .retriever import get_full_law as _get_full_law, get_paragraph as _get_paragraph, search as _search
 
 
 def _load_embedding_config() -> dict:
@@ -20,6 +20,18 @@ def _load_embedding_config() -> dict:
             cfg = tomllib.load(f)
         return cfg.get("embedding", {}) or {}
     return {}
+
+
+def get_paragraph(law: str, paragraph: str) -> dict | None:
+    """Retrieve all chunks of a specific paragraph by exact match."""
+    embedding_config = _load_embedding_config()
+    return _get_paragraph(law=law, paragraph=paragraph, embedding_config=embedding_config or None)
+
+
+def get_full_law(law: str, offset: int = 0, limit: int = 50) -> dict:
+    """Return paginated paragraphs of a complete law."""
+    embedding_config = _load_embedding_config()
+    return _get_full_law(law=law, offset=offset, limit=limit, embedding_config=embedding_config or None)
 
 
 def search_law(query: str, laws: list[str] = None, top_k: int = 10) -> list[dict]:
@@ -51,6 +63,19 @@ try:
     @app.post("/search")
     def http_search(req: SearchRequest) -> list[dict]:
         return search_law(query=req.query, laws=req.laws, top_k=req.top_k)
+
+    @app.get("/paragraph/{law}/{paragraph}")
+    def http_get_paragraph(law: str, paragraph: str) -> dict:
+        result = get_paragraph(law, paragraph)
+        if result is None:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail=f"{law} {paragraph} not found in index")
+        return result
+
+    @app.get("/law/{law}")
+    def http_get_full_law(law: str, offset: int = 0, limit: int = 50) -> dict:
+        return get_full_law(law=law, offset=offset, limit=limit)
 
     @app.get("/health")
     def health():

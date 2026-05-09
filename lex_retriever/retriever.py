@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections import defaultdict
 
 import chromadb
 
@@ -82,3 +83,86 @@ def search(
         }
         for i in range(len(docs))
     ]
+
+
+def get_paragraph(law: str, paragraph: str, embedding_config: dict | None = None) -> dict | None:
+    """Retrieve all chunks of a specific paragraph by exact match.
+
+    Args:
+        law:       Law code e.g. "BGB"
+        paragraph: Paragraph identifier e.g. "§ 242" or "Art. 20"
+
+    Returns:
+        { "law", "paragraph", "text": "<full reconstructed text>", "chunks": int }
+        or None if not found
+    """
+    collection = _get_collection(embedding_config)
+    # ChromaDB 1.x $contains is a list-element operator, not substring — filter in Python.
+    result = collection.get(
+        where={"law": law},
+        include=["documents", "metadatas"],
+    )
+    if not result["ids"]:
+        return None
+
+    pairs = [
+        (meta, doc)
+        for meta, doc in zip(result["metadatas"], result["documents"])
+        if meta.get("paragraph", "").startswith(paragraph)
+    ]
+    if not pairs:
+        return None
+
+    pairs.sort(key=lambda x: x[0].get("paragraph", ""))
+    full_text = " ".join(doc for _, doc in pairs)
+
+    return {
+        "law": law,
+        "paragraph": paragraph,
+        "text": full_text,
+        "chunks": len(pairs),
+    }
+
+
+def get_full_law(law: str, offset: int = 0, limit: int = 50, embedding_config: dict | None = None) -> dict:
+    """Return paginated paragraphs of a complete law.
+
+    Args:
+        law:    Law code e.g. "AGG"
+        offset: Paragraph offset for pagination
+        limit:  Number of paragraphs per page (default 50)
+
+    Returns:
+        {
+          "law": str,
+          "total_paragraphs": int,
+          "offset": int,
+          "paragraphs": [{ "paragraph": str, "text": str }]
+        }
+    """
+    collection = _get_collection(embedding_config)
+    result = collection.get(
+        where={"law": law},
+        include=["documents", "metadatas"],
+    )
+
+    paragraph_chunks: dict[str, list[tuple[dict, str]]] = defaultdict(list)
+    for meta, doc in zip(result["metadatas"], result["documents"]):
+        paragraph_chunks[meta["paragraph"]].append((meta, doc))
+
+    sorted_paragraphs = sorted(paragraph_chunks.keys())
+    total = len(sorted_paragraphs)
+    page = sorted_paragraphs[offset : offset + limit]
+
+    paragraphs = []
+    for para_key in page:
+        chunks = sorted(paragraph_chunks[para_key], key=lambda x: x[0].get("paragraph", ""))
+        text = " ".join(doc for _, doc in chunks)
+        paragraphs.append({"paragraph": para_key, "text": text})
+
+    return {
+        "law": law,
+        "total_paragraphs": total,
+        "offset": offset,
+        "paragraphs": paragraphs,
+    }
