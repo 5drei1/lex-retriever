@@ -3,11 +3,11 @@
 import os
 import pytest
 
-_has_db = os.path.exists(os.path.join(os.path.dirname(__file__), "..", "chroma_db"))
+_has_db = os.path.exists(os.path.join(os.path.dirname(__file__), "..", "lancedb", "german_law.lance"))
 
 
 @pytest.mark.requires_db
-@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
+@pytest.mark.skipif(not _has_db, reason="lancedb not present — run `python -m lex_retriever index-all` first")
 def test_get_paragraph_returns_dict_with_required_keys():
     from lex_retriever import get_paragraph
     result = get_paragraph("BGB", "§ 242")
@@ -23,7 +23,7 @@ def test_get_paragraph_returns_dict_with_required_keys():
 
 
 @pytest.mark.requires_db
-@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
+@pytest.mark.skipif(not _has_db, reason="lancedb not present — run `python -m lex_retriever index-all` first")
 def test_get_paragraph_missing_returns_none():
     from lex_retriever import get_paragraph
     result = get_paragraph("BGB", "§ 99999")
@@ -31,7 +31,7 @@ def test_get_paragraph_missing_returns_none():
 
 
 @pytest.mark.requires_db
-@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
+@pytest.mark.skipif(not _has_db, reason="lancedb not present — run `python -m lex_retriever index-all` first")
 def test_get_paragraph_text_is_non_empty():
     from lex_retriever import get_paragraph
     result = get_paragraph("BGB", "§ 242")

@@ -1,168 +1,113 @@
-"""Retriever: semantic search over ChromaDB-indexed law paragraphs."""
+"""Retriever: semantic search over LanceDB-indexed law paragraphs."""
 
 from __future__ import annotations
 
 import os
+import lancedb
 
-import chromadb
-
-from .embeddings import get_chroma_embedding_function
+from .embeddings import get_embedding_provider
 from .query_expansion import expand_query
 
-CHROMA_PATH = os.environ.get("CHROMA_PATH", os.path.join(os.path.dirname(__file__), "..", "chroma_db"))
-COLLECTION_NAME = "german_law"
-
-_client: chromadb.PersistentClient | None = None
-_collection = None
-_collection_config_key: str | None = None
+LANCE_PATH = os.environ.get("LANCE_PATH", os.path.join(os.path.dirname(__file__), "..", "lancedb"))
+TABLE_NAME = "german_law"
 
 
-def _get_collection(embedding_config: dict | None = None):
-    global _client, _collection, _collection_config_key
-    key = str(sorted((embedding_config or {}).items()))
-    if _collection is None or _collection_config_key != key:
-        _client = chromadb.PersistentClient(path=CHROMA_PATH)
-        ef = get_chroma_embedding_function(embedding_config)
-        _collection = _client.get_or_create_collection(
-            name=COLLECTION_NAME, embedding_function=ef, metadata={"hnsw:space": "cosine"}
+class LexRetriever:
+    def __init__(self, lance_path: str = LANCE_PATH, embedding_config: dict | None = None):
+        self._lance_path = lance_path
+        self._embedding_config = embedding_config
+        self._table = None
+        self._embedder = get_embedding_provider(embedding_config)
+
+    def _get_table(self):
+        if self._table is None:
+            db = lancedb.connect(self._lance_path)
+            self._table = db.open_table(TABLE_NAME)
+        return self._table
+
+    def search(self, query: str, laws: list[str] | None = None, top_k: int = 10) -> list[dict]:
+        table = self._get_table()
+        expanded = expand_query(query)
+        vector = self._embedder.embed([expanded])
+
+        q = table.search(vector, vector_column_name="vector")
+
+        if laws:
+            normalized = [l.upper() for l in laws]
+            if len(normalized) == 1:
+                q = q.where(f"law = '{normalized[0]}'")
+            else:
+                in_clause = ", ".join(f"'{l}'" for l in normalized)
+                q = q.where(f"law IN ({in_clause})")
+
+        results = q.limit(top_k).to_list()
+
+        return [
+            {
+                "law":            r["law"],
+                "paragraph":      r["paragraph"],
+                "text":           r["text"],
+                "score":          round(1.0 - (r["_distance"] / 2), 4),
+                "original_query": query,
+            }
+            for r in results
+        ]
+
+    def get_paragraph(self, law: str, paragraph: str) -> dict | None:
+        table = self._get_table()
+        results = (
+            table.search()
+            .where(f"law = '{law.upper()}' AND paragraph LIKE '%{paragraph}%'")
+            .to_list()
         )
-        _collection_config_key = key
-    return _collection
+        if not results:
+            return None
+        results.sort(key=lambda r: r["paragraph"])
+        full_text = " ".join(r["text"] for r in results)
+        return {"law": law.upper(), "paragraph": paragraph, "text": full_text, "chunks": len(results)}
 
+    def get_full_law(self, law: str, offset: int = 0, limit: int = 50) -> dict:
+        from collections import defaultdict
 
-def search(
-    query: str,
-    laws: list[str] | None = None,
-    top_k: int = 10,
-    embedding_config: dict | None = None,
-) -> list[dict]:
-    """Semantic search over indexed German law paragraphs.
+        table = self._get_table()
+        results = (
+            table.search()
+            .where(f"law = '{law.upper()}'")
+            .to_list()
+        )
 
-    Args:
-        query:            Natural language question or legal term
-        laws:             Optional filter e.g. ["BGB", "HGB"] — None = search all
-        top_k:            Number of results to return
-        embedding_config: Optional embedding section from lex_retriever.toml
+        paragraph_chunks: dict[str, list] = defaultdict(list)
+        for row in results:
+            paragraph_chunks[row["paragraph"]].append(row)
 
-    Returns:
-        List of dicts: { law, paragraph, text, score }
-    """
-    collection = _get_collection(embedding_config)
-    expanded = expand_query(query)
+        sorted_paragraphs = sorted(paragraph_chunks.keys())
+        total = len(sorted_paragraphs)
+        page = sorted_paragraphs[offset:offset + limit]
 
-    where = None
-    if laws:
-        if len(laws) == 1:
-            where = {"law": laws[0]}
-        else:
-            where = {"law": {"$in": list(laws)}}
+        paragraphs = []
+        for para_key in page:
+            chunks = sorted(paragraph_chunks[para_key], key=lambda r: r["paragraph"])
+            text = " ".join(r["text"] for r in chunks)
+            paragraphs.append({"paragraph": para_key, "text": text})
 
-    kwargs = {
-        "query_texts": [expanded],
-        "n_results": top_k,
-        "include": ["documents", "metadatas", "distances"],
-    }
-    if where:
-        kwargs["where"] = where
-
-    results = collection.query(**kwargs)
-
-    docs = results["documents"][0]
-    metas = results["metadatas"][0]
-    distances = results["distances"][0]
-
-    return [
-        {
-            "law": metas[i]["law"],
-            "paragraph": metas[i]["paragraph"],
-            "text": docs[i],
-            "score": round(1.0 - (distances[i] / 2), 4),
-            "original_query": query,
+        return {
+            "law": law.upper(),
+            "total_paragraphs": total,
+            "offset": offset,
+            "paragraphs": paragraphs,
         }
-        for i in range(len(docs))
-    ]
+
+
+# Backwards-compat wrappers
+def search(query: str, laws: list[str] | None = None, top_k: int = 10,
+           embedding_config: dict | None = None) -> list[dict]:
+    return LexRetriever(embedding_config=embedding_config).search(query, laws, top_k)
 
 
 def get_paragraph(law: str, paragraph: str, embedding_config: dict | None = None) -> dict | None:
-    """Retrieve all chunks of a specific paragraph by exact match.
-
-    Args:
-        law:       Law code e.g. "BGB"
-        paragraph: Paragraph identifier e.g. "§ 242" or "Art. 20"
-
-    Returns:
-        { "law", "paragraph", "text": "<full reconstructed text>", "chunks": int }
-        or None if not found
-    """
-    from collections import defaultdict
-
-    collection = _get_collection(embedding_config)
-    result = collection.get(
-        where={"law": law.upper()},
-        include=["documents", "metadatas"],
-    )
-    if not result["ids"]:
-        return None
-
-    pairs = [
-        (meta, doc)
-        for meta, doc in zip(result["metadatas"], result["documents"])
-        if meta.get("paragraph", "").startswith(paragraph)
-    ]
-    if not pairs:
-        return None
-
-    pairs.sort(key=lambda x: x[0].get("paragraph", ""))
-    full_text = " ".join(doc for _, doc in pairs)
-    return {
-        "law": law.upper(),
-        "paragraph": paragraph,
-        "text": full_text,
-        "chunks": len(pairs),
-    }
+    return LexRetriever(embedding_config=embedding_config).get_paragraph(law, paragraph)
 
 
-def get_full_law(law: str, offset: int = 0, limit: int = 50, embedding_config: dict | None = None) -> dict:
-    """Return paginated paragraphs of a complete law.
-
-    Args:
-        law:    Law code e.g. "AGG"
-        offset: Paragraph offset for pagination
-        limit:  Number of paragraphs per page (default 50)
-
-    Returns:
-        {
-          "law": str,
-          "total_paragraphs": int,
-          "offset": int,
-          "paragraphs": [{ "paragraph": str, "text": str }]
-        }
-    """
-    from collections import defaultdict
-
-    collection = _get_collection(embedding_config)
-    result = collection.get(
-        where={"law": law},
-        include=["documents", "metadatas"],
-    )
-
-    paragraph_chunks: dict[str, list[tuple[dict, str]]] = defaultdict(list)
-    for meta, doc in zip(result["metadatas"], result["documents"]):
-        paragraph_chunks[meta["paragraph"]].append((meta, doc))
-
-    sorted_paragraphs = sorted(paragraph_chunks.keys())
-    total = len(sorted_paragraphs)
-    page = sorted_paragraphs[offset : offset + limit]
-
-    paragraphs = []
-    for para_key in page:
-        chunks = sorted(paragraph_chunks[para_key], key=lambda x: x[0].get("paragraph", ""))
-        text = " ".join(doc for _, doc in chunks)
-        paragraphs.append({"paragraph": para_key, "text": text})
-
-    return {
-        "law": law,
-        "total_paragraphs": total,
-        "offset": offset,
-        "paragraphs": paragraphs,
-    }
+def get_full_law(law: str, offset: int = 0, limit: int = 50,
+                 embedding_config: dict | None = None) -> dict:
+    return LexRetriever(embedding_config=embedding_config).get_full_law(law, offset, limit)

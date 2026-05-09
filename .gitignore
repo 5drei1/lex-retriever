@@ -1,4 +1,5 @@
-# ChromaDB — populated locally by `python -m lex_retriever index-all`
+# Vector store data — populated locally by `python -m lex_retriever index-all`
+lancedb/
 chroma_db/
 
 # Local config (copy from lex_retriever.toml.example to create your own)

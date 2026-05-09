@@ -12,9 +12,9 @@ class SentenceTransformersProvider(EmbeddingProvider):
     dimensions = 384
 
     def __init__(self, model: str = DEFAULT_MODEL) -> None:
-        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-        self._ef = SentenceTransformerEmbeddingFunction(model_name=model)
+        from sentence_transformers import SentenceTransformer
+        self._model = SentenceTransformer(model)
         self.model = model
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        return list(self._ef(texts))
+        return self._model.encode(texts).tolist()

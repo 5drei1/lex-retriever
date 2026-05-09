@@ -1,4 +1,4 @@
-"""Embedding provider factory and ChromaDB adapter."""
+"""Embedding provider factory."""
 
 from __future__ import annotations
 
@@ -6,22 +6,6 @@ import os
 
 from .base import EmbeddingProvider
 from .sentence_transformers import DEFAULT_MODEL as _DEFAULT_ST_MODEL
-
-
-class _ProviderEmbeddingFunction:
-    """Adapts an EmbeddingProvider to ChromaDB's EmbeddingFunction interface."""
-
-    def __init__(self, provider: EmbeddingProvider) -> None:
-        self._provider = provider
-
-    def __call__(self, input: list[str]) -> list[list[float]]:
-        return self._provider.embed(list(input))
-
-    def name(self) -> str:
-        return f"lex-retriever-{self._provider.name}"
-
-    def embed_query(self, input: list[str]) -> list[list[float]]:
-        return self._provider.embed(list(input))
 
 
 def get_embedding_provider(config: dict | None = None) -> EmbeddingProvider:
@@ -60,17 +44,4 @@ def get_embedding_provider(config: dict | None = None) -> EmbeddingProvider:
     )
 
 
-def get_chroma_embedding_function(config: dict | None = None) -> _ProviderEmbeddingFunction:
-    """Return a ChromaDB-compatible embedding function for the configured provider."""
-    cfg = config or {}
-    provider_name = cfg.get("provider", "sentence-transformers")
-
-    if provider_name == "sentence-transformers":
-        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-        model = cfg.get("model", _DEFAULT_ST_MODEL)
-        return SentenceTransformerEmbeddingFunction(model_name=model)  # type: ignore[return-value]
-
-    return _ProviderEmbeddingFunction(get_embedding_provider(cfg))
-
-
-__all__ = ["EmbeddingProvider", "get_embedding_provider", "get_chroma_embedding_function"]
+__all__ = ["EmbeddingProvider", "get_embedding_provider"]

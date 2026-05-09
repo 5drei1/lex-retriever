@@ -12,9 +12,7 @@ class TestGetEmbeddingProvider:
         from lex_retriever.embeddings import get_embedding_provider
         from lex_retriever.embeddings.sentence_transformers import SentenceTransformersProvider
 
-        with patch(
-            "chromadb.utils.embedding_functions.SentenceTransformerEmbeddingFunction"
-        ):
+        with patch("sentence_transformers.SentenceTransformer"):
             provider = get_embedding_provider({})
         assert isinstance(provider, SentenceTransformersProvider)
 
@@ -156,55 +154,3 @@ class TestGoogleEmbeddingProvider:
         assert isinstance(provider, GoogleEmbeddingProvider)
 
 
-class TestProviderChangeDetection:
-    def test_provider_id_default(self):
-        from lex_retriever.indexer import _provider_id
-
-        assert _provider_id(None) == "sentence-transformers"
-        assert _provider_id({}) == "sentence-transformers"
-
-    def test_provider_id_with_model(self):
-        from lex_retriever.indexer import _provider_id
-
-        pid = _provider_id({"provider": "mistral", "model": "mistral-embed"})
-        assert pid == "mistral:mistral-embed"
-
-    def test_provider_id_without_model(self):
-        from lex_retriever.indexer import _provider_id
-
-        pid = _provider_id({"provider": "google"})
-        assert pid == "google"
-
-    def test_write_and_read_stored_provider(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("CHROMA_PATH", str(tmp_path))
-
-        import lex_retriever.indexer as idx
-
-        monkeypatch.setattr(idx, "CHROMA_PATH", str(tmp_path))
-
-        idx._write_stored_provider("mistral:mistral-embed")
-        assert idx._read_stored_provider() == "mistral:mistral-embed"
-
-    def test_provider_change_warns_to_stderr(self, tmp_path, monkeypatch, capsys):
-        import lex_retriever.indexer as idx
-
-        monkeypatch.setattr(idx, "CHROMA_PATH", str(tmp_path))
-
-        idx._write_stored_provider("sentence-transformers")
-        idx._check_provider_change({"provider": "mistral", "model": "mistral-embed"}, force=False)
-
-        captured = capsys.readouterr()
-        assert "provider changed" in captured.err
-        assert "sentence-transformers" in captured.err
-        assert "mistral:mistral-embed" in captured.err
-
-    def test_no_warning_when_provider_unchanged(self, tmp_path, monkeypatch, capsys):
-        import lex_retriever.indexer as idx
-
-        monkeypatch.setattr(idx, "CHROMA_PATH", str(tmp_path))
-
-        idx._write_stored_provider("sentence-transformers")
-        idx._check_provider_change({}, force=False)
-
-        captured = capsys.readouterr()
-        assert captured.err == ""

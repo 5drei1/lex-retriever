@@ -3,11 +3,11 @@
 import os
 import pytest
 
-_has_db = os.path.exists(os.path.join(os.path.dirname(__file__), "..", "chroma_db"))
+_has_db = os.path.exists(os.path.join(os.path.dirname(__file__), "..", "lancedb", "german_law.lance"))
 
 
 @pytest.mark.requires_db
-@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
+@pytest.mark.skipif(not _has_db, reason="lancedb not present — run `python -m lex_retriever index-all` first")
 def test_get_full_law_response_structure():
     from lex_retriever import get_full_law
     result = get_full_law("BGB", offset=0, limit=50)
@@ -23,7 +23,7 @@ def test_get_full_law_response_structure():
 
 
 @pytest.mark.requires_db
-@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
+@pytest.mark.skipif(not _has_db, reason="lancedb not present — run `python -m lex_retriever index-all` first")
 def test_get_full_law_pagination_limit():
     from lex_retriever import get_full_law
     result = get_full_law("BGB", offset=0, limit=2)
@@ -34,7 +34,7 @@ def test_get_full_law_pagination_limit():
 
 
 @pytest.mark.requires_db
-@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
+@pytest.mark.skipif(not _has_db, reason="lancedb not present — run `python -m lex_retriever index-all` first")
 def test_get_full_law_pagination_offset():
     from lex_retriever import get_full_law
     page1 = get_full_law("BGB", offset=0, limit=2)

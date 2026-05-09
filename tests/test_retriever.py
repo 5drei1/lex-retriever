@@ -5,70 +5,57 @@ import os
 import random
 from unittest.mock import patch
 
-import chromadb
 import pytest
 
 import lex_retriever.retriever as _retriever_mod
 
-_has_db = os.path.exists(os.path.join(os.path.dirname(__file__), "..", "chroma_db"))
+_has_db = os.path.exists(os.path.join(os.path.dirname(__file__), "..", "lancedb", "german_law.lance"))
 
 
-class _DeterministicEF:
-    """Minimal deterministic embedding function — no model download needed."""
-
-    def _embed(self, input: list[str]) -> list[list[float]]:
-        results = []
-        for text in input:
-            seed = int(hashlib.md5(text.encode()).hexdigest(), 16) % (2**31)
-            rng = random.Random(seed)
-            results.append([rng.uniform(-1, 1) for _ in range(384)])
-        return results
-
-    def __call__(self, input: list[str]) -> list[list[float]]:
-        return self._embed(input)
-
-    def embed_query(self, input: list[str]) -> list[list[float]]:
-        return self._embed(input)
+def _det_vector(text: str) -> list[float]:
+    """Deterministic 384-dim vector derived from text hash — no model download needed."""
+    seed = int(hashlib.md5(text.encode()).hexdigest(), 16) % (2**31)
+    rng = random.Random(seed)
+    return [rng.uniform(-1, 1) for _ in range(384)]
 
 
 @pytest.fixture
-def _gmbhg_collection():
-    """In-memory ChromaDB collection with GmbHG chunks; patches retriever module globals."""
-    client = chromadb.EphemeralClient()
-    ef = _DeterministicEF()
-    collection = client.create_collection("german_law", embedding_function=ef)
-    collection.add(
-        ids=["gmbhg-1", "gmbhg-2", "gmbhg-3"],
-        documents=[
-            "Der Geschäftsführer ist zur Führung der Geschäfte der Gesellschaft bestellt.",
-            "Die Gesellschafter der GmbH bestellen den Geschäftsführer durch Beschluss.",
-            "Der Geschäftsführer vertritt die Gesellschaft gerichtlich und außergerichtlich.",
-        ],
-        metadatas=[
-            {"law": "GmbHG", "paragraph": "§ 6 Abs. 1"},
-            {"law": "GmbHG", "paragraph": "§ 6 Abs. 2"},
-            {"law": "GmbHG", "paragraph": "§ 35 Abs. 1"},
-        ],
-    )
+def _gmbhg_collection(tmp_path):
+    """LanceDB table with GmbHG chunks; patches LexRetriever._get_table and get_embedding_provider."""
+    import lancedb
 
-    old_collection = _retriever_mod._collection
-    old_client = _retriever_mod._client
-    old_key = _retriever_mod._collection_config_key
+    texts = [
+        "Der Geschäftsführer ist zur Führung der Geschäfte der Gesellschaft bestellt.",
+        "Die Gesellschafter der GmbH bestellen den Geschäftsführer durch Beschluss.",
+        "Der Geschäftsführer vertritt die Gesellschaft gerichtlich und außergerichtlich.",
+    ]
 
-    _retriever_mod._collection = collection
-    _retriever_mod._client = client
-    _retriever_mod._collection_config_key = "[]"
+    rows = [
+        {"id": "gmbhg-1", "law": "GMBHG", "paragraph": "§ 6 Abs. 1",
+         "text": texts[0], "source": "test", "vector": _det_vector(texts[0])},
+        {"id": "gmbhg-2", "law": "GMBHG", "paragraph": "§ 6 Abs. 2",
+         "text": texts[1], "source": "test", "vector": _det_vector(texts[1])},
+        {"id": "gmbhg-3", "law": "GMBHG", "paragraph": "§ 35 Abs. 1",
+         "text": texts[2], "source": "test", "vector": _det_vector(texts[2])},
+    ]
 
-    with patch("lex_retriever.tool._load_embedding_config", return_value={}):
+    db = lancedb.connect(str(tmp_path))
+    table = db.create_table("german_law", data=rows)
+
+    class _MockEmbedder:
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            return [_det_vector(t) for t in texts]
+
+    from lex_retriever.retriever import LexRetriever
+
+    with patch.object(LexRetriever, "_get_table", return_value=table), \
+         patch("lex_retriever.retriever.get_embedding_provider", return_value=_MockEmbedder()), \
+         patch("lex_retriever.tool._load_embedding_config", return_value={}):
         yield
-
-    _retriever_mod._collection = old_collection
-    _retriever_mod._client = old_client
-    _retriever_mod._collection_config_key = old_key
 
 
 @pytest.mark.requires_db
-@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
+@pytest.mark.skipif(not _has_db, reason="lancedb not present — run `python -m lex_retriever index-all` first")
 def test_search_law_returns_list():
     from lex_retriever import search_law
     results = search_law("Haftung", top_k=3)
@@ -76,7 +63,7 @@ def test_search_law_returns_list():
 
 
 @pytest.mark.requires_db
-@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
+@pytest.mark.skipif(not _has_db, reason="lancedb not present — run `python -m lex_retriever index-all` first")
 def test_search_law_result_structure():
     from lex_retriever import search_law
     results = search_law("Vertragspflichten", top_k=2)
@@ -94,11 +81,11 @@ def test_search_law_with_filter(_gmbhg_collection):
     results = search_law("Geschäftsführer", laws=["GmbHG"], top_k=3)
     assert results, "expected at least one result"
     for r in results:
-        assert r["law"] == "GmbHG"
+        assert r["law"] == "GMBHG"
 
 
 @pytest.mark.requires_db
-@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
+@pytest.mark.skipif(not _has_db, reason="lancedb not present — run `python -m lex_retriever index-all` first")
 def test_search_law_top_k():
     from lex_retriever import search_law
     results = search_law("Paragraphentest", top_k=3)

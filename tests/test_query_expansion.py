@@ -81,75 +81,80 @@ def test_no_duplicate_synonyms_in_expansion():
 # ---------------------------------------------------------------------------
 
 
-def _mock_collection(docs, metas, distances):
-    col = MagicMock()
-    col.query.return_value = {
-        "documents": [docs],
-        "metadatas": [metas],
-        "distances": [distances],
-    }
-    return col
+def _make_mock_table(rows):
+    """Create a mock LanceDB table that returns given rows from search()."""
+    mock_table = MagicMock()
+    q = MagicMock()
+    q.where.return_value = q
+    q.limit.return_value = q
+    q.to_list.return_value = rows
+    mock_table.search.return_value = q
+    return mock_table
+
+
+def _search_with_capture(query, top_k=1):
+    """Run search() with a mock table and capturing embedder; return (results, embedded_texts)."""
+    from lex_retriever.retriever import LexRetriever
+
+    rows = [{"law": "BGB", "paragraph": "§ 280", "text": "Schadensersatz.",
+             "source": "x", "id": "1", "_distance": 0.1}]
+    mock_table = _make_mock_table(rows)
+
+    captured: list[str] = []
+
+    class _CapturingEmbedder:
+        def embed(self, texts):
+            captured.extend(texts)
+            return [[0.0] * 384]
+
+    with patch.object(LexRetriever, "_get_table", return_value=mock_table), \
+         patch("lex_retriever.retriever.get_embedding_provider", return_value=_CapturingEmbedder()):
+        from lex_retriever.retriever import search as _search
+        results = _search(query, top_k=top_k)
+    return results, captured
 
 
 def test_search_uses_expanded_query():
-    mock_col = _mock_collection(
-        ["§ 280 Schadensersatz wegen Pflichtverletzung."],
-        [{"law": "BGB", "paragraph": "§ 280"}],
-        [0.1],
-    )
-    with patch("lex_retriever.retriever._get_collection", return_value=mock_col):
-        from lex_retriever.retriever import search
-
-        search("Haftung", top_k=1)
-        query_texts = mock_col.query.call_args.kwargs["query_texts"]
-        assert query_texts[0] != "Haftung"
-        assert "schadensersatz" in query_texts[0].lower()
+    _, embedded = _search_with_capture("Haftung")
+    assert embedded, "embedder was not called"
+    assert embedded[0] != "Haftung"
+    assert "schadensersatz" in embedded[0].lower()
 
 
 def test_search_results_contain_original_query():
-    mock_col = _mock_collection(
-        ["§ 280 Schadensersatz wegen Pflichtverletzung."],
-        [{"law": "BGB", "paragraph": "§ 280"}],
-        [0.1],
-    )
-    with patch("lex_retriever.retriever._get_collection", return_value=mock_col):
-        from lex_retriever.retriever import search
-
-        results = search("Haftung für Schäden", top_k=1)
-        assert len(results) == 1
-        assert results[0]["original_query"] == "Haftung für Schäden"
+    results, _ = _search_with_capture("Haftung für Schäden")
+    assert len(results) == 1
+    assert results[0]["original_query"] == "Haftung für Schäden"
 
 
 def test_search_result_structure_preserved():
-    mock_col = _mock_collection(
-        ["§ 823 Schadensersatzpflicht."],
-        [{"law": "BGB", "paragraph": "§ 823"}],
-        [0.05],
-    )
-    with patch("lex_retriever.retriever._get_collection", return_value=mock_col):
-        from lex_retriever.retriever import search
+    from lex_retriever.retriever import LexRetriever
 
-        results = search("Schaden", top_k=1)
-        r = results[0]
-        assert r["law"] == "BGB"
-        assert r["paragraph"] == "§ 823"
-        assert "text" in r
-        assert isinstance(r["score"], float)
-        assert r["original_query"] == "Schaden"
+    rows = [{"law": "BGB", "paragraph": "§ 823", "text": "Schadensersatzpflicht.",
+             "source": "x", "id": "2", "_distance": 0.05}]
+    mock_table = _make_mock_table(rows)
+
+    class _DummyEmbedder:
+        def embed(self, texts):
+            return [[0.0] * 384]
+
+    with patch.object(LexRetriever, "_get_table", return_value=mock_table), \
+         patch("lex_retriever.retriever.get_embedding_provider", return_value=_DummyEmbedder()):
+        from lex_retriever.retriever import search as _search
+        results = _search("Schaden", top_k=1)
+
+    r = results[0]
+    assert r["law"] == "BGB"
+    assert r["paragraph"] == "§ 823"
+    assert "text" in r
+    assert isinstance(r["score"], float)
+    assert r["original_query"] == "Schaden"
 
 
 def test_search_unexpanded_query_passes_through_unchanged():
-    mock_col = _mock_collection(
-        ["Irgendein Text."],
-        [{"law": "HGB", "paragraph": "§ 1"}],
-        [0.2],
-    )
-    with patch("lex_retriever.retriever._get_collection", return_value=mock_col):
-        from lex_retriever.retriever import search
-
-        search("Prozessrecht", top_k=1)
-        query_texts = mock_col.query.call_args.kwargs["query_texts"]
-        assert query_texts[0] == "Prozessrecht"
+    _, embedded = _search_with_capture("Prozessrecht")
+    assert embedded, "embedder was not called"
+    assert embedded[0] == "Prozessrecht"
 
 
 # ---------------------------------------------------------------------------
@@ -157,12 +162,12 @@ def test_search_unexpanded_query_passes_through_unchanged():
 # ---------------------------------------------------------------------------
 
 _has_db = os.path.exists(
-    os.path.join(os.path.dirname(__file__), "..", "chroma_db", "chroma.sqlite3")
+    os.path.join(os.path.dirname(__file__), "..", "lancedb", "german_law.lance")
 )
 
 
 @pytest.mark.requires_db
-@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run indexer first")
+@pytest.mark.skipif(not _has_db, reason="lancedb not present — run `python -m lex_retriever index-all` first")
 def test_expanded_haftung_fuer_schaeden_scores_higher():
     """Expanded 'Haftung für Schäden' should surface at least one result
     with a higher top score than the unexpanded raw query."""
