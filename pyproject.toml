@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lex-retriever"
+version = "0.1.0"
+description = "Agent-callable semantic search tool for German law — pluggable providers, LanceDB backend"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+keywords = ["rag", "legal", "german-law", "lancedb", "semantic-search"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "lancedb>=0.13",
+    "pyarrow>=15.0",
+    "sentence-transformers>=3.0.0,<4.0",
+    "requests>=2.31.0,<3.0",
+    "lxml>=4.9.0,<6.0",
+]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.100.0,<1.0",
+    "uvicorn>=0.22.0,<1.0",
+    "pydantic>=2.0.0,<3.0",
+]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/5drei1/lex-retriever"
+Issues = "https://github.com/5drei1/lex-retriever/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lex_retriever*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "requires_db: marks tests that require a populated lancedb (skip with -m 'not requires_db')",
+    "integration: marks integration tests that call external services",
+]

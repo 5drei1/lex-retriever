@@ -1,0 +1,21 @@
+# Vector store data — populated locally by `python -m lex_retriever index-all`
+lancedb/
+chroma_db/
+
+# Local config (copy from lex_retriever.toml.example to create your own)
+lex_retriever.toml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.py[cod]
+*.egg-info/
+.env
+
+# Tools
+.pytest_cache/
+.venv/
+venv/
+dist/
+build/
