@@ -23,7 +23,9 @@ def _get_collection(embedding_config: dict | None = None):
     if _collection is None or _collection_config_key != key:
         _client = chromadb.PersistentClient(path=CHROMA_PATH)
         ef = get_chroma_embedding_function(embedding_config)
-        _collection = _client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=ef)
+        _collection = _client.get_or_create_collection(
+            name=COLLECTION_NAME, embedding_function=ef, metadata={"hnsw:space": "cosine"}
+        )
         _collection_config_key = key
     return _collection
 
@@ -75,7 +77,7 @@ def search(
             "law": metas[i]["law"],
             "paragraph": metas[i]["paragraph"],
             "text": docs[i],
-            "score": round(1.0 - distances[i], 4),
+            "score": round(1.0 - (distances[i] / 2), 4),
             "original_query": query,
         }
         for i in range(len(docs))
