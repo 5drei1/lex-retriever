@@ -1,10 +1,34 @@
 """Unit tests for indexer chunking logic."""
 
+import hashlib
 import logging
 
 import pytest
 
-from lex_retriever.indexer import chunk_text
+from lex_retriever.indexer import _chunk_id, chunk_text
+
+
+class TestChunkId:
+    def test_deterministic(self):
+        assert _chunk_id("BGB", "§ 1", 0) == _chunk_id("BGB", "§ 1", 0)
+
+    def test_different_inputs_differ(self):
+        assert _chunk_id("BGB", "§ 1", 0) != _chunk_id("BGB", "§ 1", 1)
+        assert _chunk_id("BGB", "§ 1", 0) != _chunk_id("BGB", "§ 2", 0)
+        assert _chunk_id("BGB", "§ 1", 0) != _chunk_id("HGB", "§ 1", 0)
+
+    def test_law_code_normalized_to_upper(self):
+        assert _chunk_id("bgb", "§ 1", 0) == _chunk_id("BGB", "§ 1", 0)
+
+    def test_returns_16_hex_chars(self):
+        result = _chunk_id("BGB", "§ 242", 0)
+        assert len(result) == 16
+        assert all(c in "0123456789abcdef" for c in result)
+
+    def test_stable_known_value(self):
+        raw = "BGB|§ 1|0"
+        expected = hashlib.sha1(raw.encode()).hexdigest()[:16]
+        assert _chunk_id("BGB", "§ 1", 0) == expected
 
 
 class TestChunkText:

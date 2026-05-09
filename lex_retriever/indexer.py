@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -19,6 +20,11 @@ _CHUNK_MAX_WORDS = 100
 _CHUNK_OVERLAP_WORDS = 20
 
 _PROVIDER_FILE = ".embedding_provider"
+
+
+def _chunk_id(law_code: str, paragraph: str, chunk_idx: int) -> str:
+    raw = f"{law_code.upper()}|{paragraph}|{chunk_idx}"
+    return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
 
 def chunk_text(text: str, max_tokens: int = _CHUNK_MAX_WORDS, overlap: int = _CHUNK_OVERLAP_WORDS) -> list[str]:
@@ -148,7 +154,7 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
                 }
             )
 
-    ids = [f"{law_code.upper()}_{i}" for i in range(len(indexed_chunks))]
+    ids = [_chunk_id(law_code, c["paragraph"], i) for i, c in enumerate(indexed_chunks)]
     documents = [c["text"] for c in indexed_chunks]
     metadatas = [
         {
