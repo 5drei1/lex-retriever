@@ -52,11 +52,10 @@ def search(
 
     where = None
     if laws:
-        normalized = [l.upper() for l in laws]
-        if len(normalized) == 1:
-            where = {"law": normalized[0]}
+        if len(laws) == 1:
+            where = {"law": laws[0]}
         else:
-            where = {"law": {"$in": normalized}}
+            where = {"law": {"$in": list(laws)}}
 
     kwargs = {
         "query_texts": [expanded],
@@ -84,6 +83,45 @@ def search(
     ]
 
 
+def get_paragraph(law: str, paragraph: str, embedding_config: dict | None = None) -> dict | None:
+    """Retrieve all chunks of a specific paragraph by exact match.
+
+    Args:
+        law:       Law code e.g. "BGB"
+        paragraph: Paragraph identifier e.g. "§ 242" or "Art. 20"
+
+    Returns:
+        { "law", "paragraph", "text": "<full reconstructed text>", "chunks": int }
+        or None if not found
+    """
+    from collections import defaultdict
+
+    collection = _get_collection(embedding_config)
+    result = collection.get(
+        where={"law": law.upper()},
+        include=["documents", "metadatas"],
+    )
+    if not result["ids"]:
+        return None
+
+    pairs = [
+        (meta, doc)
+        for meta, doc in zip(result["metadatas"], result["documents"])
+        if meta.get("paragraph", "").startswith(paragraph)
+    ]
+    if not pairs:
+        return None
+
+    pairs.sort(key=lambda x: x[0].get("paragraph", ""))
+    full_text = " ".join(doc for _, doc in pairs)
+    return {
+        "law": law.upper(),
+        "paragraph": paragraph,
+        "text": full_text,
+        "chunks": len(pairs),
+    }
+
+
 def get_full_law(law: str, offset: int = 0, limit: int = 50, embedding_config: dict | None = None) -> dict:
     """Return paginated paragraphs of a complete law.
 
@@ -104,7 +142,7 @@ def get_full_law(law: str, offset: int = 0, limit: int = 50, embedding_config: d
 
     collection = _get_collection(embedding_config)
     result = collection.get(
-        where={"law": law.upper()},
+        where={"law": law},
         include=["documents", "metadatas"],
     )
 
@@ -123,7 +161,7 @@ def get_full_law(law: str, offset: int = 0, limit: int = 50, embedding_config: d
         paragraphs.append({"paragraph": para_key, "text": text})
 
     return {
-        "law": law.upper(),
+        "law": law,
         "total_paragraphs": total,
         "offset": offset,
         "paragraphs": paragraphs,

@@ -122,7 +122,7 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
     collection = _get_collection(embedding_config, force=force)
 
     if not force:
-        existing = collection.get(where={"law": law_code.upper()}, limit=1)
+        existing = collection.get(where={"law": law_code}, limit=1)
         if existing["ids"]:
             return 0
 
@@ -158,7 +158,7 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
     documents = [c["text"] for c in indexed_chunks]
     metadatas = [
         {
-            "law": law_code.upper(),
+            "law": law_code,
             "paragraph": c["paragraph"],
             "source": c["source"],
         }
@@ -166,7 +166,7 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
     ]
 
     if force:
-        existing_ids = collection.get(where={"law": law_code.upper()})["ids"]
+        existing_ids = collection.get(where={"law": law_code})["ids"]
         if existing_ids:
             collection.delete(ids=existing_ids)
 
