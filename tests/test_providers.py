@@ -1,9 +1,15 @@
 """Tests for the Law-Provider architecture."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
+import requests
 
 from lex_retriever.providers.base import LawProvider
-from lex_retriever.providers.gesetze_im_internet import GesetzImInternetProvider
+from lex_retriever.providers.gesetze_im_internet import (
+    GesetzImInternetProvider,
+    _fetch_with_retry,
+)
 from lex_retriever.providers import REGISTRY, get_providers_for_law, all_supported_laws
 
 
@@ -87,6 +93,47 @@ class TestGesetzImInternetProvider:
     def test_name(self):
         p = GesetzImInternetProvider()
         assert p.name == "gesetze-im-internet"
+
+    def test_fetch_with_retry_retries_on_network_error(self):
+        """_fetch_with_retry retries up to 3 times before giving up (reraise=True)."""
+        from tenacity import wait_none
+
+        mock_get = MagicMock(side_effect=requests.ConnectionError("timeout"))
+        fast_fetch = _fetch_with_retry.retry_with(wait=wait_none())
+        with patch(
+            "lex_retriever.providers.gesetze_im_internet.requests.get",
+            mock_get,
+        ):
+            with pytest.raises(requests.ConnectionError):
+                fast_fetch("https://example.com/test.zip")
+        assert mock_get.call_count == 3
+
+    def test_fetch_with_retry_succeeds_after_transient_error(self):
+        """_fetch_with_retry returns content when a later attempt succeeds."""
+        from tenacity import wait_none
+
+        ok_response = MagicMock()
+        ok_response.content = b"data"
+        ok_response.raise_for_status = MagicMock()
+
+        fast_fetch = _fetch_with_retry.retry_with(wait=wait_none())
+        with patch(
+            "lex_retriever.providers.gesetze_im_internet.requests.get",
+            side_effect=[requests.ConnectionError("timeout"), ok_response],
+        ) as mock_get:
+            result = fast_fetch("https://example.com/test.zip")
+        assert result == b"data"
+        assert mock_get.call_count == 2
+
+    def test_fetch_raises_runtime_error_after_all_retries_exhausted(self):
+        """fetch() raises RuntimeError with URL after 3 failed attempts."""
+        with patch(
+            "lex_retriever.providers.gesetze_im_internet._fetch_with_retry",
+            side_effect=requests.ConnectionError("network down"),
+        ):
+            p = GesetzImInternetProvider()
+            with pytest.raises(RuntimeError, match="Failed to fetch.*bgb.*3 attempts"):
+                p.fetch("BGB")
 
 
 # ---------------------------------------------------------------------------

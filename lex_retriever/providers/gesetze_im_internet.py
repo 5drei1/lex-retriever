@@ -4,6 +4,7 @@ import zipfile
 from xml.etree import ElementTree as ET
 
 import requests
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .base import LawProvider
 
@@ -70,6 +71,18 @@ def _xml_zip_url(slug: str) -> str:
     return f"https://www.gesetze-im-internet.de/{slug}/xml.zip"
 
 
+@retry(
+    retry=retry_if_exception_type(requests.RequestException),
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    reraise=True,
+)
+def _fetch_with_retry(url: str) -> bytes:
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+    return response.content
+
+
 def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
     """Parse a single GII XML file into paragraph chunks."""
     try:
@@ -134,11 +147,15 @@ class GesetzImInternetProvider(LawProvider):
 
         _, slug = entry
         url = _xml_zip_url(slug)
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
+        try:
+            content = _fetch_with_retry(url)
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                f"Failed to fetch '{url}' after 3 attempts: {exc}"
+            ) from exc
 
         chunks = []
-        with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
             for name in zf.namelist():
                 if name.endswith(".xml"):
                     with zf.open(name) as f:
