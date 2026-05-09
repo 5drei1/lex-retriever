@@ -281,6 +281,27 @@ The `lex_retriever.toml` file is listed in `.gitignore` and is not committed to 
 
 ---
 
+## Embedding Model
+
+| Property | Value |
+|---|---|
+| Model | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` |
+| Size on disk | ~470 MB (downloaded on first use) |
+| RAM at runtime | ~500–600 MB |
+| Token limit | **128 tokens** |
+| Languages | 50+ (German primary) |
+| Dimensions | 384 |
+
+> ⚠️ **Token limit:** The model silently truncates input beyond 128 tokens.
+> `lex-retriever` automatically splits long paragraphs into overlapping chunks
+> to ensure full coverage. No manual configuration required.
+
+> ℹ️ **First start:** The model (~470 MB) is downloaded automatically from
+> HuggingFace on first use. Subsequent starts load from local cache.
+> Set `SENTENCE_TRANSFORMERS_HOME` to control the cache location.
+
+---
+
 ## Running Tests
 
 ```bash
