@@ -71,7 +71,17 @@ def index_law(law_code: str, force: bool = False) -> int:
 
 
 def index_all_laws(force: bool = False) -> dict[str, int]:
-    """Index all laws supported by all registered providers."""
+    """Index ALL laws from ALL registered providers.
+
+    No code changes needed to pick up new laws —
+    simply register a new LawProvider in providers/__init__.py.
+
+    Args:
+        force: Re-index even if laws are already present
+
+    Returns:
+        Dict mapping law code to number of chunks indexed (0 = already up to date)
+    """
     from .providers import all_supported_laws
     results = {}
     for law_code in all_supported_laws():
