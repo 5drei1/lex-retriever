@@ -41,22 +41,23 @@ python -m lex_retriever index StGB
 ## Quick Start
 
 ```bash
-# Core only (Python tool usage)
+# 1. Install dependencies
 pip install -r requirements.txt
 
 # With HTTP API (FastAPI server)
 pip install -r requirements-api.txt
 
-# Index all known laws at once (recommended)
+# 2. Build the local index (required after every fresh clone)
+#    The vector database is not stored in Git — you must build it locally.
 python -m lex_retriever index-all
 
-# Index a specific law
+# Index a specific law only
 python -m lex_retriever index BGB
 
 # List all available laws (no download)
 python -m lex_retriever list-laws
 
-# Search
+# 3. Search
 python -c "
 from lex_retriever import search_law
 for r in search_law('Haftung bei Vertragsverletzung', top_k=3):
