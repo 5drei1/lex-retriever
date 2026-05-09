@@ -109,3 +109,131 @@ class TestChunkTextWarning:
 
         assert any("split into" in r.message for r in caplog.records)
         assert any("128-token" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# lex_cases.indexer — make_case_id, schema, batching
+# ---------------------------------------------------------------------------
+
+class TestMakeCaseId:
+    def test_deterministic(self):
+        from lex_cases.indexer import make_case_id
+        assert make_case_id("BGH", "IV ZR 1/24", 0) == make_case_id("BGH", "IV ZR 1/24", 0)
+
+    def test_different_court_differs(self):
+        from lex_cases.indexer import make_case_id
+        assert make_case_id("BGH", "IV ZR 1/24", 0) != make_case_id("BAG", "IV ZR 1/24", 0)
+
+    def test_different_az_differs(self):
+        from lex_cases.indexer import make_case_id
+        assert make_case_id("BGH", "IV ZR 1/24", 0) != make_case_id("BGH", "IV ZR 2/24", 0)
+
+    def test_different_chunk_idx_differs(self):
+        from lex_cases.indexer import make_case_id
+        assert make_case_id("BGH", "IV ZR 1/24", 0) != make_case_id("BGH", "IV ZR 1/24", 1)
+
+    def test_returns_sha1_hex_40_chars(self):
+        from lex_cases.indexer import make_case_id
+        result = make_case_id("BGH", "IV ZR 1/24", 0)
+        assert len(result) == 40
+        assert all(c in "0123456789abcdef" for c in result)
+
+    def test_stable_known_value(self):
+        import hashlib
+        from lex_cases.indexer import make_case_id
+        expected = hashlib.sha1("BGH|IV ZR 1/24|0".encode()).hexdigest()
+        assert make_case_id("BGH", "IV ZR 1/24", 0) == expected
+
+
+class TestCaseSchemaFields:
+    """Verify index_cases writes rows with all required schema fields."""
+
+    def _make_case(self) -> dict:
+        return {
+            "court": "BGH", "az": "IV ZR 1/24", "date": "2024-01-15",
+            "type": "Urteil", "chunk_type": "leitsatz",
+            "text": "Der Hersteller haftet.", "laws_cited": ["§ 823 BGB"],
+            "url": "https://www.rechtsprechung-im-internet.de/jportal/?docid=TEST001",
+        }
+
+    def test_row_has_all_required_fields(self):
+        from unittest.mock import MagicMock, patch
+        from lex_cases.indexer import index_cases
+
+        captured: list[dict] = []
+
+        class _Embedder:
+            def embed(self, texts):
+                return [[0.0] * 4 for _ in texts]
+
+        mock_db = MagicMock()
+        mock_db.table_names.return_value = []
+        mock_db.create_table.side_effect = lambda name, data: (captured.extend(data), MagicMock())[1]
+
+        with patch("lex_cases.indexer.lancedb.connect", return_value=mock_db), \
+             patch("lex_cases.indexer.get_embedding_provider", return_value=_Embedder()), \
+             patch("lex_cases.indexer.os.makedirs"):
+            index_cases([self._make_case()])
+
+        assert captured
+        required = {"id", "court", "az", "date", "type", "chunk_type", "text", "laws_cited", "url", "vector"}
+        assert required.issubset(captured[0].keys()), f"Missing: {required - captured[0].keys()}"
+
+
+class TestCaseBatching:
+    """Verify embedding calls are batched in groups of ≤ _BATCH_SIZE (16)."""
+
+    def _make_cases(self, n: int) -> list[dict]:
+        return [
+            {"court": "BGH", "az": f"IV ZR {i}/24", "date": "2024-01-15",
+             "type": "Urteil", "chunk_type": "leitsatz", "text": f"Text {i}",
+             "laws_cited": [], "url": f"https://example.com/{i}"}
+            for i in range(n)
+        ]
+
+    def test_no_batch_exceeds_batch_size(self):
+        from unittest.mock import MagicMock, patch
+        from lex_cases.indexer import _BATCH_SIZE, index_cases
+
+        batch_sizes: list[int] = []
+
+        class _Embedder:
+            def embed(self, texts):
+                batch_sizes.append(len(texts))
+                return [[0.0] * 4 for _ in texts]
+
+        mock_db = MagicMock()
+        mock_db.table_names.return_value = []
+        mock_db.create_table.return_value = MagicMock()
+
+        with patch("lex_cases.indexer.lancedb.connect", return_value=mock_db), \
+             patch("lex_cases.indexer.get_embedding_provider", return_value=_Embedder()), \
+             patch("lex_cases.indexer.os.makedirs"):
+            index_cases(self._make_cases(50))
+
+        assert batch_sizes
+        assert all(bs <= _BATCH_SIZE for bs in batch_sizes), \
+            f"Batch exceeded {_BATCH_SIZE}: {batch_sizes}"
+
+    def test_batches_cover_all_items(self):
+        from unittest.mock import MagicMock, patch
+        from lex_cases.indexer import _BATCH_SIZE, index_cases
+
+        batch_sizes: list[int] = []
+
+        class _Embedder:
+            def embed(self, texts):
+                batch_sizes.append(len(texts))
+                return [[0.0] * 4 for _ in texts]
+
+        mock_db = MagicMock()
+        mock_db.table_names.return_value = []
+        mock_db.create_table.return_value = MagicMock()
+
+        n = _BATCH_SIZE + 5
+        with patch("lex_cases.indexer.lancedb.connect", return_value=mock_db), \
+             patch("lex_cases.indexer.get_embedding_provider", return_value=_Embedder()), \
+             patch("lex_cases.indexer.os.makedirs"):
+            index_cases(self._make_cases(n))
+
+        assert sum(batch_sizes) == n

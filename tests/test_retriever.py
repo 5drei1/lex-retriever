@@ -3,7 +3,7 @@
 import hashlib
 import os
 import random
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -98,3 +98,99 @@ def test_import_works():
     assert callable(search_law)
     assert callable(index_law)
     assert callable(index_all_laws)
+
+
+# ---------------------------------------------------------------------------
+# lex_cases.retriever — LexCaseRetriever
+# ---------------------------------------------------------------------------
+
+def _case_vector(text: str) -> list[float]:
+    import hashlib
+    import random
+    seed = int(hashlib.md5(text.encode()).hexdigest(), 16) % (2**31)
+    rng = random.Random(seed)
+    return [rng.uniform(-1, 1) for _ in range(384)]
+
+
+class _CaseMockQuery:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def limit(self, n):
+        return self
+
+    def to_list(self):
+        return list(self._rows)
+
+
+_CASE_ROWS = [
+    {"court": "BGH",  "az": "IV ZR 1/24",   "date": "2024-01-15", "type": "Urteil",
+     "leitsatz": "Produzentenhaftung.", "laws_cited": ["§ 823 BGB"], "url": "https://ex.com/1",
+     "vector": _case_vector("a"), "_distance": 0.1},
+    {"court": "BAG",  "az": "1 AZR 100/23", "date": "2023-06-01", "type": "Urteil",
+     "leitsatz": "Kündigungsschutz.", "laws_cited": ["§ 613a BGB"], "url": "https://ex.com/2",
+     "vector": _case_vector("b"), "_distance": 0.2},
+    {"court": "BGH",  "az": "II ZR 50/22",  "date": "2022-03-01", "type": "Urteil",
+     "leitsatz": "Pflichtverletzung.", "laws_cited": ["§ 280 BGB"], "url": "https://ex.com/3",
+     "vector": _case_vector("c"), "_distance": 0.3},
+]
+
+
+@pytest.fixture
+def case_retriever():
+    from unittest.mock import MagicMock
+    from lex_cases.retriever import LexCaseRetriever
+
+    class _MockEmbedder:
+        def embed(self, texts):
+            return [_case_vector(t) for t in texts]
+
+    r = LexCaseRetriever(db_path="/tmp/test_case_lancedb", embedding_provider=_MockEmbedder())
+    mock_table = MagicMock()
+    mock_table.search = MagicMock(return_value=_CaseMockQuery(_CASE_ROWS))
+    r._table = mock_table
+    return r, mock_table
+
+
+class TestLexCaseRetrieverSearch:
+    def test_returns_list(self, case_retriever):
+        r, _ = case_retriever
+        assert isinstance(r.search("Haftung"), list)
+
+    def test_courts_filter(self, case_retriever):
+        r, mock_table = case_retriever
+        mock_table.search = MagicMock(return_value=_CaseMockQuery(_CASE_ROWS))
+        results = r.search("Haftung", courts=["BGH"])
+        assert results
+        assert all(res["court"] == "BGH" for res in results)
+
+    def test_date_from_filter(self, case_retriever):
+        r, mock_table = case_retriever
+        mock_table.search = MagicMock(return_value=_CaseMockQuery(_CASE_ROWS))
+        results = r.search("Haftung", date_from="2024-01-01")
+        assert all(res["date"] >= "2024-01-01" for res in results)
+
+    def test_date_to_filter(self, case_retriever):
+        r, mock_table = case_retriever
+        mock_table.search = MagicMock(return_value=_CaseMockQuery(_CASE_ROWS))
+        results = r.search("Haftung", date_to="2022-12-31")
+        assert all(res["date"] <= "2022-12-31" for res in results)
+
+    def test_score_in_range(self, case_retriever):
+        r, _ = case_retriever
+        for res in r.search("Haftung"):
+            assert 0.0 <= res["score"] <= 1.0
+
+
+class TestGetCasesCitingLaw:
+    def test_filters_by_law_and_paragraph(self, case_retriever):
+        r, mock_table = case_retriever
+        mock_table.search = MagicMock(return_value=_CaseMockQuery(_CASE_ROWS))
+        results = r.get_cases_citing_law("BGB", "§ 823")
+        assert results
+        assert all("§ 823 BGB" in res["laws_cited"] for res in results)
+
+    def test_no_match_returns_empty(self, case_retriever):
+        r, mock_table = case_retriever
+        mock_table.search = MagicMock(return_value=_CaseMockQuery(_CASE_ROWS))
+        assert r.get_cases_citing_law("ZPO", "§ 91") == []
