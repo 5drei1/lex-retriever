@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 
 import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
+from .embeddings import get_chroma_embedding_function
 from .providers import get_providers_for_law
 
 logger = logging.getLogger(__name__)
 
 CHROMA_PATH = os.environ.get("CHROMA_PATH", os.path.join(os.path.dirname(__file__), "..", "chroma_db"))
 COLLECTION_NAME = "german_law"
-EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-# Model hard limit is 128 tokens; 100-word chunks stay safely under it (German ~1.3 tokens/word).
 _CHUNK_MAX_WORDS = 100
 _CHUNK_OVERLAP_WORDS = 20
+
+_PROVIDER_FILE = ".embedding_provider"
 
 
 def chunk_text(text: str, max_tokens: int = _CHUNK_MAX_WORDS, overlap: int = _CHUNK_OVERLAP_WORDS) -> list[str]:
@@ -39,18 +40,58 @@ def chunk_text(text: str, max_tokens: int = _CHUNK_MAX_WORDS, overlap: int = _CH
     return chunks
 
 
-def _get_collection():
+def _provider_id(embedding_config: dict | None) -> str:
+    cfg = embedding_config or {}
+    provider = cfg.get("provider", "sentence-transformers")
+    model = cfg.get("model", "")
+    return f"{provider}:{model}" if model else provider
+
+
+def _provider_file_path() -> str:
+    return os.path.join(CHROMA_PATH, _PROVIDER_FILE)
+
+
+def _read_stored_provider() -> str | None:
+    path = _provider_file_path()
+    try:
+        with open(path) as f:
+            return json.load(f).get("provider_id")
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        return None
+
+
+def _write_stored_provider(provider_id: str) -> None:
+    os.makedirs(CHROMA_PATH, exist_ok=True)
+    with open(_provider_file_path(), "w") as f:
+        json.dump({"provider_id": provider_id}, f)
+
+
+def _get_collection(embedding_config: dict | None = None):
     client = chromadb.PersistentClient(path=CHROMA_PATH)
-    ef = SentenceTransformerEmbeddingFunction(model_name=EMBEDDING_MODEL)
+    ef = get_chroma_embedding_function(embedding_config)
     return client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=ef)
 
 
-def index_law(law_code: str, force: bool = False) -> int:
+def _check_provider_change(embedding_config: dict | None, force: bool) -> None:
+    stored = _read_stored_provider()
+    current = _provider_id(embedding_config)
+    if stored and stored != current:
+        import sys
+        print(
+            f"Warning: embedding provider changed from '{stored}' to '{current}'. "
+            "The existing index was built with a different provider — search results will be unreliable. "
+            "Re-index with --force to rebuild the index with the new provider.",
+            file=sys.stderr,
+        )
+
+
+def index_law(law_code: str, force: bool = False, embedding_config: dict | None = None) -> int:
     """Fetch and index all paragraphs for a given law code.
 
     Args:
-        law_code: Law abbreviation e.g. "BGB"
-        force:    Re-index even if already present
+        law_code:         Law abbreviation e.g. "BGB"
+        force:            Re-index even if already present
+        embedding_config: Optional embedding section from lex_retriever.toml
 
     Returns:
         Number of chunks indexed (0 = already up to date)
@@ -59,9 +100,9 @@ def index_law(law_code: str, force: bool = False) -> int:
     if not providers:
         raise ValueError(f"No provider found for law '{law_code}'")
 
-    collection = _get_collection()
+    _check_provider_change(embedding_config, force)
+    collection = _get_collection(embedding_config)
 
-    # Check existing entries if not forcing
     if not force:
         existing = collection.get(where={"law": law_code.upper()}, limit=1)
         if existing["ids"]:
@@ -74,8 +115,6 @@ def index_law(law_code: str, force: bool = False) -> int:
     if not raw_chunks:
         return 0
 
-    # Split long paragraphs into overlapping sub-chunks so nothing exceeds the
-    # 128-token model limit. Short paragraphs pass through as-is.
     indexed_chunks: list[dict] = []
     for chunk in raw_chunks:
         sub_chunks = chunk_text(chunk["text"])
@@ -108,22 +147,27 @@ def index_law(law_code: str, force: bool = False) -> int:
         for c in indexed_chunks
     ]
 
-    # Delete stale entries before upserting (handles force re-index)
     if force:
         existing_ids = collection.get(where={"law": law_code.upper()})["ids"]
         if existing_ids:
             collection.delete(ids=existing_ids)
 
     collection.add(ids=ids, documents=documents, metadatas=metadatas)
+    _write_stored_provider(_provider_id(embedding_config))
     return len(indexed_chunks)
 
 
-def index_all_laws(force: bool = False, law_codes: list[str] | None = None) -> dict[str, int]:
+def index_all_laws(
+    force: bool = False,
+    law_codes: list[str] | None = None,
+    embedding_config: dict | None = None,
+) -> dict[str, int]:
     """Index laws from all registered providers.
 
     Args:
-        force:      Re-index even if laws are already present
-        law_codes:  Explicit list of law codes to index; defaults to all supported laws
+        force:            Re-index even if laws are already present
+        law_codes:        Explicit list of law codes to index; defaults to all supported laws
+        embedding_config: Optional embedding section from lex_retriever.toml
 
     Returns:
         Dict mapping law code to number of chunks indexed (0 = already up to date)
@@ -133,7 +177,7 @@ def index_all_laws(force: bool = False, law_codes: list[str] | None = None) -> d
         law_codes = all_supported_laws()
     results = {}
     for law_code in law_codes:
-        results[law_code] = index_law(law_code, force=force)
+        results[law_code] = index_law(law_code, force=force, embedding_config=embedding_config)
     return results
 
 

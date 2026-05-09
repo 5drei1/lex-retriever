@@ -273,7 +273,7 @@ The `lex_retriever.toml` file is listed in `.gitignore` and is not committed to 
 
 ## Technical Details
 
-- Embedding model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+- Embedding: pluggable provider (sentence-transformers default, Mistral, Google)
 - Vector DB: ChromaDB (cosine similarity)
 - German federal laws: gesetze-im-internet.de (XML-ZIP archives)
 - EU regulations: eur-lex.europa.eu (Akoma Ntoso XML)
@@ -281,24 +281,62 @@ The `lex_retriever.toml` file is listed in `.gitignore` and is not committed to 
 
 ---
 
-## Embedding Model
+## Embedding Models
 
-| Property | Value |
-|---|---|
-| Model | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` |
-| Size on disk | ~470 MB (downloaded on first use) |
-| RAM at runtime | ~500–600 MB |
-| Token limit | **128 tokens** |
-| Languages | 50+ (German primary) |
-| Dimensions | 384 |
+The embedding provider is configured in `lex_retriever.toml` and can be changed without any code modifications.
 
-> ⚠️ **Token limit:** The model silently truncates input beyond 128 tokens.
-> `lex-retriever` automatically splits long paragraphs into overlapping chunks
-> to ensure full coverage. No manual configuration required.
+| Provider | Model | Token Limit | Dimensions | Cost |
+|---|---|---|---|---|
+| sentence-transformers | `paraphrase-multilingual-MiniLM-L12-v2` | ⚠️ 128 | 384 | free, local |
+| Mistral | `mistral-embed` | 8,192 | 1,024 | $0.10/1M tokens |
+| Google | `text-embedding-004` | 2,048 | 768 | **free tier** |
 
-> ℹ️ **First start:** The model (~470 MB) is downloaded automatically from
-> HuggingFace on first use. Subsequent starts load from local cache.
-> Set `SENTENCE_TRANSFORMERS_HOME` to control the cache location.
+> 💡 **Google API Key (free, no credit card required):**
+> [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+
+> ⚠️ **Provider change requires re-indexing.** If you switch providers, run:
+> `python -m lex_retriever index-all --force`
+> The tool warns you on the next index operation if the stored provider differs from your config.
+
+### sentence-transformers (default)
+
+No API key needed. The model (~470 MB) is downloaded automatically from HuggingFace on first use.
+
+```toml
+[embedding]
+provider = "sentence-transformers"
+model = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+```
+
+> ⚠️ **128-token limit:** Long paragraphs are automatically split into overlapping chunks — no manual action needed.
+
+### Mistral
+
+```bash
+pip install mistralai
+export MISTRAL_API_KEY="your-key"
+```
+
+```toml
+[embedding]
+provider = "mistral"
+model = "mistral-embed"
+api_key_env = "MISTRAL_API_KEY"
+```
+
+### Google Gemini
+
+```bash
+pip install google-generativeai
+export GOOGLE_API_KEY="your-key"
+```
+
+```toml
+[embedding]
+provider = "google"
+model = "text-embedding-004"
+api_key_env = "GOOGLE_API_KEY"
+```
 
 ---
 

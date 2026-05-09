@@ -17,6 +17,7 @@ def main():
     config = _load_config()
     active_laws: list[str] | None = config.get("laws", {}).get("active")
     db_path: str | None = config.get("database", {}).get("path")
+    embedding_config: dict = config.get("embedding", {}) or {}
 
     if db_path:
         os.environ.setdefault("CHROMA_PATH", db_path)
@@ -29,7 +30,9 @@ def main():
         law_codes = [l.upper() for l in active_laws] if active_laws else None
         if law_codes:
             print(f"Using active laws from config: {', '.join(law_codes)}")
-        results = index_all_laws(force=force, law_codes=law_codes)
+        if embedding_config:
+            print(f"Embedding provider: {embedding_config.get('provider', 'sentence-transformers')}")
+        results = index_all_laws(force=force, law_codes=law_codes, embedding_config=embedding_config)
         for law, count in results.items():
             status = f"{count} chunks indexed" if count > 0 else "already up to date"
             print(f"  {law}: {status}")
@@ -38,7 +41,7 @@ def main():
         from .indexer import index_law
         law_code = sys.argv[2].upper()
         force = "--force" in sys.argv
-        count = index_law(law_code, force=force)
+        count = index_law(law_code, force=force, embedding_config=embedding_config)
         status = f"{count} chunks indexed" if count > 0 else "already up to date (use --force to re-index)"
         print(f"{law_code}: {status}")
 

@@ -17,3 +17,23 @@ active = [
     "STGB",
     "ZPO",
 ]
+
+[embedding]
+# Embedding provider — controls how text is turned into vectors.
+# Changing the provider requires a full re-index: python -m lex_retriever index-all --force
+
+# --- Default: local, no API key needed, 128-token limit ---
+provider = "sentence-transformers"
+model = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+# --- Mistral: better quality, 8 192-token limit ---
+# pip install mistralai
+# provider = "mistral"
+# model = "mistral-embed"
+# api_key_env = "MISTRAL_API_KEY"
+
+# --- Google: free-tier API key available, 2 048-token limit ---
+# pip install google-generativeai
+# provider = "google"
+# model = "text-embedding-004"
+# api_key_env = "GOOGLE_API_KEY"

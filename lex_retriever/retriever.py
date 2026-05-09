@@ -5,37 +5,46 @@ from __future__ import annotations
 import os
 
 import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+
+from .embeddings import get_chroma_embedding_function
 
 CHROMA_PATH = os.environ.get("CHROMA_PATH", os.path.join(os.path.dirname(__file__), "..", "chroma_db"))
 COLLECTION_NAME = "german_law"
-EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 _client: chromadb.PersistentClient | None = None
 _collection = None
+_collection_config_key: str | None = None
 
 
-def _get_collection():
-    global _client, _collection
-    if _collection is None:
+def _get_collection(embedding_config: dict | None = None):
+    global _client, _collection, _collection_config_key
+    key = str(sorted((embedding_config or {}).items()))
+    if _collection is None or _collection_config_key != key:
         _client = chromadb.PersistentClient(path=CHROMA_PATH)
-        ef = SentenceTransformerEmbeddingFunction(model_name=EMBEDDING_MODEL)
+        ef = get_chroma_embedding_function(embedding_config)
         _collection = _client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=ef)
+        _collection_config_key = key
     return _collection
 
 
-def search(query: str, laws: list[str] | None = None, top_k: int = 10) -> list[dict]:
+def search(
+    query: str,
+    laws: list[str] | None = None,
+    top_k: int = 10,
+    embedding_config: dict | None = None,
+) -> list[dict]:
     """Semantic search over indexed German law paragraphs.
 
     Args:
-        query:  Natural language question or legal term
-        laws:   Optional filter e.g. ["BGB", "HGB"] — None = search all
-        top_k:  Number of results to return
+        query:            Natural language question or legal term
+        laws:             Optional filter e.g. ["BGB", "HGB"] — None = search all
+        top_k:            Number of results to return
+        embedding_config: Optional embedding section from lex_retriever.toml
 
     Returns:
         List of dicts: { law, paragraph, text, score }
     """
-    collection = _get_collection()
+    collection = _get_collection(embedding_config)
 
     where = None
     if laws:
