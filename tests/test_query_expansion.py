@@ -62,6 +62,20 @@ def test_no_duplicates_from_repeated_term():
     assert result.startswith("Haftung Haftung")
 
 
+def test_compound_word_triggers_component_synonyms():
+    # "Vertragsstrafe" contains "vertrag" and "strafe" as substrings
+    result = expand_query("Vertragsstrafe")
+    assert "vertragspflicht" in result.lower()
+    assert "bußgeld" in result.lower()
+
+
+def test_no_duplicate_synonyms_in_expansion():
+    # "haftung" and "schaden" both expand to "schadensersatz" — must appear once
+    result = expand_query("Haftung Schaden")
+    suffix = result[len("Haftung Schaden"):].lower()
+    assert suffix.count("schadensersatz") == 1
+
+
 # ---------------------------------------------------------------------------
 # Integration tests: search() uses expansion and preserves original_query
 # ---------------------------------------------------------------------------
