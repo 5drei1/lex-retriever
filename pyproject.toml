@@ -21,6 +21,7 @@ dependencies = [
     "sentence-transformers>=3.0.0,<4.0",
     "requests>=2.31.0,<3.0",
     "lxml>=4.9.0,<6.0",
+    "tenacity>=8.0,<10.0",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +40,7 @@ Issues = "https://github.com/5drei1/lex-retriever/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["lex_retriever*"]
+include = ["lex_retriever*", "lex_cases*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
