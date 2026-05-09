@@ -7,7 +7,7 @@
           {
             "type": "command",
             "if": "Bash(git commit*)",
-            "command": "CMD=$(jq -r '.tool_input.command // \"\"'); if echo \"$CMD\" | grep -qi 'co-authored-by'; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Commit message contains Co-Authored-By trailer. Remove it before committing.\"}}'; fi",
+            "command": "CMD=$(jq -r '.tool_input.command // \"\"'); echo \"$CMD\" | grep -qE '^\\s*git(\\s+-C\\s+\\S+)?\\s+commit\\b' || exit 0; if echo \"$CMD\" | grep -qi 'co-authored-by'; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Commit message contains Co-Authored-By trailer. Remove it before committing.\"}}'; fi",
             "statusMessage": "Checking commit message for Co-Authored-By..."
           }
         ]
