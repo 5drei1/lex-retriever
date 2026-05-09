@@ -73,8 +73,8 @@ class TestGesetzImInternetProvider:
         p = GesetzImInternetProvider()
         assert "BGB" in p.supported_laws
         assert "HGB" in p.supported_laws
-        assert "GmbHG" in p.supported_laws
-        assert "GewO" in p.supported_laws
+        assert "GMBHG" in p.supported_laws
+        assert "GEWO" in p.supported_laws
 
     def test_is_available(self):
         p = GesetzImInternetProvider()

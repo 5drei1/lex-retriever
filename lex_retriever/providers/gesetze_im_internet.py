@@ -11,8 +11,8 @@ from .base import LawProvider
 _LAW_URLS = {
     "BGB": "https://www.gesetze-im-internet.de/bgb/xml.zip",
     "HGB": "https://www.gesetze-im-internet.de/hgb/xml.zip",
-    "GmbHG": "https://www.gesetze-im-internet.de/gmbhg/xml.zip",
-    "GewO": "https://www.gesetze-im-internet.de/gewo/xml.zip",
+    "GMBHG": "https://www.gesetze-im-internet.de/gmbhg/xml.zip",
+    "GEWO": "https://www.gesetze-im-internet.de/gewo/xml.zip",
 }
 
 # Namespace used in GII XML files
