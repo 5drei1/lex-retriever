@@ -10,7 +10,7 @@ import os
 import tomllib
 from pathlib import Path
 
-from .retriever import search as _search, get_full_law as _get_full_law
+from .retriever import search as _search, get_full_law as _get_full_law, get_paragraph as _get_paragraph
 
 
 def _load_embedding_config() -> dict:
@@ -20,6 +20,12 @@ def _load_embedding_config() -> dict:
             cfg = tomllib.load(f)
         return cfg.get("embedding", {}) or {}
     return {}
+
+
+def get_paragraph(law: str, paragraph: str) -> dict | None:
+    """Retrieve all chunks of a specific paragraph by exact match."""
+    embedding_config = _load_embedding_config()
+    return _get_paragraph(law=law, paragraph=paragraph, embedding_config=embedding_config or None)
 
 
 def get_full_law(law: str, offset: int = 0, limit: int = 50) -> dict:
@@ -47,12 +53,18 @@ try:
     from fastapi import FastAPI
     from pydantic import BaseModel
 
+    from .cross_reference import extract_references, resolve_references
+
     app = FastAPI(title="lex-retriever", description="Semantic search over German law")
 
     class SearchRequest(BaseModel):
         query: str
         laws: list[str] | None = None
         top_k: int = 10
+
+    class ResolveRequest(BaseModel):
+        text: str
+        default_law: str | None = None
 
     @app.post("/search")
     def http_search(req: SearchRequest) -> list[dict]:
@@ -61,6 +73,10 @@ try:
     @app.get("/law/{law}")
     def http_get_full_law(law: str, offset: int = 0, limit: int = 50) -> dict:
         return get_full_law(law=law, offset=offset, limit=limit)
+
+    @app.post("/resolve-references")
+    def http_resolve_references(body: ResolveRequest) -> list[dict]:
+        return resolve_references(body.text, body.default_law)
 
     @app.get("/health")
     def health():
