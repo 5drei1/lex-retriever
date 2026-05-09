@@ -13,6 +13,7 @@ _LAW_URLS = {
     "HGB": "https://www.gesetze-im-internet.de/hgb/xml.zip",
     "GMBHG": "https://www.gesetze-im-internet.de/gmbhg/xml.zip",
     "GEWO": "https://www.gesetze-im-internet.de/gewo/xml.zip",
+    "BDSG_2018": "https://www.gesetze-im-internet.de/bdsg_2018/xml.zip",
 }
 
 # Namespace used in GII XML files
