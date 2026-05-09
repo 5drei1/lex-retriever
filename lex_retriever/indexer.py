@@ -66,10 +66,17 @@ def _write_stored_provider(provider_id: str) -> None:
         json.dump({"provider_id": provider_id}, f)
 
 
-def _get_collection(embedding_config: dict | None = None):
+def _get_collection(embedding_config: dict | None = None, force: bool = False):
     client = chromadb.PersistentClient(path=CHROMA_PATH)
     ef = get_chroma_embedding_function(embedding_config)
-    return client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=ef)
+    try:
+        return client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=ef)
+    except ValueError as exc:
+        if "Embedding function conflict" in str(exc) and force:
+            # Provider changed with --force: drop the whole collection and start fresh.
+            client.delete_collection(name=COLLECTION_NAME)
+            return client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=ef)
+        raise
 
 
 def _check_provider_change(embedding_config: dict | None, force: bool) -> None:
@@ -101,7 +108,7 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
         raise ValueError(f"No provider found for law '{law_code}'")
 
     _check_provider_change(embedding_config, force)
-    collection = _get_collection(embedding_config)
+    collection = _get_collection(embedding_config, force=force)
 
     if not force:
         existing = collection.get(where={"law": law_code.upper()}, limit=1)
@@ -152,7 +159,14 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
         if existing_ids:
             collection.delete(ids=existing_ids)
 
-    collection.add(ids=ids, documents=documents, metadatas=metadatas)
+    batch_size = 32
+    for start in range(0, len(ids), batch_size):
+        end = start + batch_size
+        collection.add(
+            ids=ids[start:end],
+            documents=documents[start:end],
+            metadatas=metadatas[start:end],
+        )
     _write_stored_provider(_provider_id(embedding_config))
     return len(indexed_chunks)
 

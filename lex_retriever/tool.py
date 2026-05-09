@@ -4,7 +4,22 @@ This module provides the primary entry point for agents.
 Optionally expose via FastAPI with: uvicorn lex_retriever.tool:app
 """
 
+from __future__ import annotations
+
+import os
+import tomllib
+from pathlib import Path
+
 from .retriever import search as _search
+
+
+def _load_embedding_config() -> dict:
+    config_path = Path(os.environ.get("LEX_CONFIG", "lex_retriever.toml"))
+    if config_path.exists():
+        with open(config_path, "rb") as f:
+            cfg = tomllib.load(f)
+        return cfg.get("embedding", {}) or {}
+    return {}
 
 
 def search_law(query: str, laws: list[str] = None, top_k: int = 10) -> list[dict]:
@@ -18,7 +33,8 @@ def search_law(query: str, laws: list[str] = None, top_k: int = 10) -> list[dict
     Returns:
         List of dicts: { "law": str, "paragraph": str, "text": str, "score": float }
     """
-    return _search(query=query, laws=laws, top_k=top_k)
+    embedding_config = _load_embedding_config()
+    return _search(query=query, laws=laws, top_k=top_k, embedding_config=embedding_config or None)
 
 
 try:

@@ -10,7 +10,10 @@ class MistralEmbeddingProvider(EmbeddingProvider):
     dimensions = 1024
 
     def __init__(self, model: str = "mistral-embed", api_key: str | None = None) -> None:
-        from mistralai import Mistral
+        try:
+            from mistralai import Mistral  # mistralai < 2 (has __init__.py)
+        except ImportError:
+            from mistralai.client import Mistral  # mistralai >= 2 (namespace package)
         self.client = Mistral(api_key=api_key)
         self.model = model
 

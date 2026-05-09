@@ -17,6 +17,12 @@ class _ProviderEmbeddingFunction:
     def __call__(self, input: list[str]) -> list[list[float]]:
         return self._provider.embed(list(input))
 
+    def name(self) -> str:
+        return f"lex-retriever-{self._provider.name}"
+
+    def embed_query(self, input: list[str]) -> list[list[float]]:
+        return self._provider.embed(list(input))
+
 
 def get_embedding_provider(config: dict | None = None) -> EmbeddingProvider:
     """Instantiate the embedding provider specified in config."""
