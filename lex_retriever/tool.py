@@ -70,6 +70,14 @@ try:
     def http_search(req: SearchRequest) -> list[dict]:
         return search_law(query=req.query, laws=req.laws, top_k=req.top_k)
 
+    @app.get("/paragraph/{law}/{paragraph}")
+    def http_get_paragraph(law: str, paragraph: str) -> dict:
+        from fastapi import HTTPException
+        result = get_paragraph(law, paragraph)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"{law} {paragraph} not found in index")
+        return result
+
     @app.get("/law/{law}")
     def http_get_full_law(law: str, offset: int = 0, limit: int = 50) -> dict:
         return get_full_law(law=law, offset=offset, limit=limit)
