@@ -94,19 +94,22 @@ class TestGesetzImInternetProvider:
         p = GesetzImInternetProvider()
         assert p.name == "gesetze-im-internet"
 
-    def test_fetch_with_retry_retries_on_network_error(self):
-        """_fetch_with_retry retries up to 3 times before giving up (reraise=True)."""
-        from tenacity import wait_none
+    def test_fetch_with_retry_retries_on_network_error(self, monkeypatch):
+        """fetch() retries 3 times then re-raises the original ConnectionError."""
+        import requests as req
+        p = GesetzImInternetProvider()
+        call_count = 0
 
-        mock_get = MagicMock(side_effect=requests.ConnectionError("timeout"))
-        fast_fetch = _fetch_with_retry.retry_with(wait=wait_none())
-        with patch(
-            "lex_retriever.providers.gesetze_im_internet.requests.get",
-            mock_get,
-        ):
-            with pytest.raises(requests.ConnectionError):
-                fast_fetch("https://example.com/test.zip")
-        assert mock_get.call_count == 3
+        def fake_get(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise req.ConnectionError("simulated failure")
+
+        monkeypatch.setattr(req, "get", fake_get)
+        monkeypatch.setattr("time.sleep", lambda _: None)
+        with pytest.raises(req.ConnectionError):
+            p.fetch("BGB")
+        assert call_count == 3  # 3 attempts before giving up
 
     def test_fetch_with_retry_succeeds_after_transient_error(self):
         """_fetch_with_retry returns content when a later attempt succeeds."""
@@ -124,16 +127,6 @@ class TestGesetzImInternetProvider:
             result = fast_fetch("https://example.com/test.zip")
         assert result == b"data"
         assert mock_get.call_count == 2
-
-    def test_fetch_raises_runtime_error_after_all_retries_exhausted(self):
-        """fetch() raises RuntimeError with URL after 3 failed attempts."""
-        with patch(
-            "lex_retriever.providers.gesetze_im_internet._fetch_with_retry",
-            side_effect=requests.ConnectionError("network down"),
-        ):
-            p = GesetzImInternetProvider()
-            with pytest.raises(RuntimeError, match="Failed to fetch.*bgb.*3 attempts"):
-                p.fetch("BGB")
 
 
 # ---------------------------------------------------------------------------

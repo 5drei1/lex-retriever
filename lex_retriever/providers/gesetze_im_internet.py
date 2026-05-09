@@ -147,12 +147,7 @@ class GesetzImInternetProvider(LawProvider):
 
         _, slug = entry
         url = _xml_zip_url(slug)
-        try:
-            content = _fetch_with_retry(url)
-        except requests.RequestException as exc:
-            raise RuntimeError(
-                f"Failed to fetch '{url}' after 3 attempts: {exc}"
-            ) from exc
+        content = _fetch_with_retry(url)
 
         chunks = []
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
