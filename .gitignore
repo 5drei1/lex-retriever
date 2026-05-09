@@ -1,11 +1,18 @@
-chroma_db/
+# ChromaDB — exclude contents but keep the placeholder
+chroma_db/*
+!chroma_db/.gitkeep
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
+*.py[cod]
+*.egg-info/
+.env
+
+# Tools
 .pytest_cache/
 .venv/
 venv/
-*.egg-info/
 dist/
 build/
-.env

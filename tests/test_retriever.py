@@ -3,19 +3,19 @@
 import os
 import pytest
 
-# Skip all retriever tests when ChromaDB is not populated (CI without indexed data)
-pytestmark = pytest.mark.skipif(
-    not os.path.exists(os.path.join(os.path.dirname(__file__), "..", "chroma_db")),
-    reason="chroma_db not present — run `python -m lex_retriever.indexer` first",
-)
+_has_db = os.path.exists(os.path.join(os.path.dirname(__file__), "..", "chroma_db"))
 
 
+@pytest.mark.requires_db
+@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
 def test_search_law_returns_list():
     from lex_retriever import search_law
     results = search_law("Haftung", top_k=3)
     assert isinstance(results, list)
 
 
+@pytest.mark.requires_db
+@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
 def test_search_law_result_structure():
     from lex_retriever import search_law
     results = search_law("Vertragspflichten", top_k=2)
@@ -28,6 +28,8 @@ def test_search_law_result_structure():
         assert 0.0 <= r["score"] <= 1.0
 
 
+@pytest.mark.requires_db
+@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
 def test_search_law_with_filter():
     from lex_retriever import search_law
     results = search_law("Geschäftsführer", laws=["GmbHG"], top_k=5)
@@ -35,6 +37,8 @@ def test_search_law_with_filter():
         assert r["law"] == "GmbHG"
 
 
+@pytest.mark.requires_db
+@pytest.mark.skipif(not _has_db, reason="chroma_db not present — run `python -m lex_retriever.indexer` first")
 def test_search_law_top_k():
     from lex_retriever import search_law
     results = search_law("Paragraphentest", top_k=3)

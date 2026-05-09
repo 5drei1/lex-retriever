@@ -1,18 +1,25 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "lex-retriever"
 version = "0.1.0"
-description = "Semantic search over indexed German law paragraphs"
+description = "Agent-callable semantic search tool for German law — pluggable providers, ChromaDB backend"
 readme = "README.md"
-license = {text = "MIT"}
+license = { text = "MIT" }
 requires-python = ">=3.10"
+keywords = ["rag", "legal", "german-law", "chromadb", "semantic-search"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "chromadb>=0.4.0",
     "sentence-transformers>=2.2.0",
     "requests>=2.28.0",
+    "lxml>=4.9.0",
 ]
 
 [project.optional-dependencies]
@@ -21,7 +28,24 @@ api = [
     "uvicorn>=0.22.0",
     "pydantic>=2.0.0",
 ]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/5drei1/lex-retriever"
+Issues = "https://github.com/5drei1/lex-retriever/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["lex_retriever*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "requires_db: marks tests that require a populated chroma_db (skip with -m 'not requires_db')",
+    "integration: marks integration tests that call external services",
+]

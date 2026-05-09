@@ -9,9 +9,14 @@
 ## Quick Start
 
 ```bash
+# Core only (Python tool usage)
 pip install -r requirements.txt
 
+# With HTTP API (FastAPI server)
+pip install -r requirements-api.txt
+
 # Index laws (downloads from gesetze-im-internet.de)
+# Note: chroma_db/ is excluded from version control — you must build it locally
 python -c "from lex_retriever.indexer import index_law; index_law('BGB')"
 
 # Search
@@ -95,7 +100,9 @@ lex-retriever/
 ├── tests/
 │   ├── test_retriever.py
 │   └── test_providers.py
-├── requirements.txt
+├── requirements.txt         # core dependencies
+├── requirements-api.txt     # optional HTTP server extras
+├── pyproject.toml
 ├── LICENSE
 └── README.md
 ```
@@ -177,10 +184,19 @@ index_all_laws()             # index all supported laws
 
 ```bash
 pip install pytest
+
+# Run all tests (retriever tests skipped if chroma_db/ not populated)
 pytest tests/ -v
+
+# Run only unit tests (skip DB-dependent tests)
+pytest -m "not requires_db" -v
+
+# Run DB-dependent tests only (requires populated chroma_db/)
+python -c "from lex_retriever.indexer import index_law; index_law('BGB')"
+pytest -m "requires_db" -v
 ```
 
-Note: test_retriever.py tests are skipped unless chroma_db/ is populated. Run index_law("BGB") first.
+> `chroma_db/` is excluded from version control. Run `index_law("BGB")` (or `index_all_laws()`) to populate it locally.
 
 ---
 
