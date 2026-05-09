@@ -7,6 +7,7 @@ import os
 import chromadb
 
 from .embeddings import get_chroma_embedding_function
+from .query_expansion import expand_query
 
 CHROMA_PATH = os.environ.get("CHROMA_PATH", os.path.join(os.path.dirname(__file__), "..", "chroma_db"))
 COLLECTION_NAME = "german_law"
@@ -45,6 +46,7 @@ def search(
         List of dicts: { law, paragraph, text, score }
     """
     collection = _get_collection(embedding_config)
+    expanded = expand_query(query)
 
     where = None
     if laws:
@@ -55,7 +57,7 @@ def search(
             where = {"law": {"$in": normalized}}
 
     kwargs = {
-        "query_texts": [query],
+        "query_texts": [expanded],
         "n_results": top_k,
         "include": ["documents", "metadatas", "distances"],
     }
@@ -74,6 +76,7 @@ def search(
             "paragraph": metas[i]["paragraph"],
             "text": docs[i],
             "score": round(1.0 - distances[i], 4),
+            "original_query": query,
         }
         for i in range(len(docs))
     ]
