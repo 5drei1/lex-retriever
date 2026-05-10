@@ -2,7 +2,7 @@
 
 import io
 import zipfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -11,11 +11,10 @@ from lex_cases.providers.rechtsprechung_im_internet import (
     RechtsprechungImInternetProvider,
     _COURT_CATALOG,
     _parse_xml_file,
-    fetch_court_xml_zip,
+    fetch_court_via_rss,
 )
 
-# Minimal XML matching the rechtsprechung-im-internet.de format.
-# Defined as strings then encoded to bytes to allow non-ASCII characters (e.g. §).
+# Minimal case XML matching the rechtsprechung-im-internet.de format.
 SAMPLE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <dokument>
   <doknr>KORE123456789</doknr>
@@ -53,6 +52,21 @@ SAMPLE_XML_NAMESPACED = """<?xml version="1.0" encoding="UTF-8"?>
 </ns:dokument>
 """.encode("utf-8")
 
+# Minimal RSS feed XML returning one item with doc ID jb-KORE123456789.
+SAMPLE_RSS = b"""<?xml version='1.0' encoding='UTF-8'?>
+<rss version='2.0'>
+<channel>
+  <title>BGH-Rechtsprechung</title>
+  <item>
+    <title>BGH 2. Zivilsenat, Urteil vom 2024-01-15, II ZR 123/23</title>
+    <link>https://www.rechtsprechung-im-internet.de/jportal/portal/page/bsjrsprod?doc.id=jb-KORE123456789</link>
+    <pubDate>15 Jan 2024 12:00:00 +0100</pubDate>
+    <guid isPermaLink="false">jb-KORE123456789</guid>
+  </item>
+</channel>
+</rss>
+"""
+
 
 def _make_zip(*xml_pairs: tuple[str, bytes]) -> bytes:
     """Build an in-memory ZIP containing the given (filename, content) pairs."""
@@ -61,6 +75,20 @@ def _make_zip(*xml_pairs: tuple[str, bytes]) -> bytes:
         for name, data in xml_pairs:
             zf.writestr(name, data)
     return buf.getvalue()
+
+
+def _rss_then_zip_mock(rss_bytes: bytes, zip_bytes: bytes):
+    """Return a mock requests.get that serves RSS on the first call, ZIP on subsequent calls."""
+    rss_response = MagicMock()
+    rss_response.content = rss_bytes
+    rss_response.raise_for_status = MagicMock()
+
+    zip_response = MagicMock()
+    zip_response.content = zip_bytes
+    zip_response.raise_for_status = MagicMock()
+
+    mock_get = MagicMock(side_effect=[rss_response, zip_response])
+    return mock_get
 
 
 class TestParseXmlFile:
@@ -121,48 +149,69 @@ class TestParseXmlFile:
         assert chunks[0]["url"].endswith("NSTEST001")
 
 
-class TestFetchCourtXmlZip:
+class TestFetchCourtViaRss:
     def test_unsupported_court_raises(self):
         with pytest.raises(ValueError, match="not in catalog"):
-            fetch_court_xml_zip("UNKNOWN")
+            fetch_court_via_rss("UNKNOWN")
+
+    def test_fetches_rss_then_individual_zips(self):
+        zip_bytes = _make_zip(("case.xml", SAMPLE_XML))
+        mock_get = _rss_then_zip_mock(SAMPLE_RSS, zip_bytes)
+
+        with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get", mock_get):
+            chunks = fetch_court_via_rss("BGH")
+
+        assert len(chunks) == 2
+        # First call must be the RSS feed URL
+        rss_url = mock_get.call_args_list[0][0][0]
+        assert "feed" in rss_url and "bgh" in rss_url
+        # Second call must be the per-case ZIP URL with the doc ID from the feed
+        zip_url = mock_get.call_args_list[1][0][0]
+        assert "bsjrs" in zip_url and "jb-KORE123456789" in zip_url
 
     def test_all_catalog_courts_accepted(self):
-        zip_bytes = _make_zip(("case1.xml", SAMPLE_XML))
-        mock_response = MagicMock()
-        mock_response.content = zip_bytes
-        mock_response.raise_for_status = MagicMock()
-
-        with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get",
-                   return_value=mock_response):
-            for court in _COURT_CATALOG:
-                chunks = fetch_court_xml_zip(court)
+        zip_bytes = _make_zip(("case.xml", SAMPLE_XML))
+        for court in _COURT_CATALOG:
+            mock_get = _rss_then_zip_mock(SAMPLE_RSS, zip_bytes)
+            with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get", mock_get):
+                chunks = fetch_court_via_rss(court)
                 assert isinstance(chunks, list)
 
     def test_returns_parsed_chunks(self):
         zip_bytes = _make_zip(("decision.xml", SAMPLE_XML))
-        mock_response = MagicMock()
-        mock_response.content = zip_bytes
-        mock_response.raise_for_status = MagicMock()
+        mock_get = _rss_then_zip_mock(SAMPLE_RSS, zip_bytes)
 
-        with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get",
-                   return_value=mock_response) as mock_get:
-            chunks = fetch_court_xml_zip("BGH")
-            called_url = mock_get.call_args[0][0]
-            assert "bgh" in called_url
-            assert len(chunks) == 2
+        with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get", mock_get):
+            chunks = fetch_court_via_rss("BGH")
 
-    def test_skips_non_xml_files(self):
+        assert len(chunks) == 2
+
+    def test_skips_failed_case_downloads(self):
+        import requests as req
+
+        rss_response = MagicMock()
+        rss_response.content = SAMPLE_RSS
+        rss_response.raise_for_status = MagicMock()
+
+        zip_response = MagicMock()
+        zip_response.raise_for_status.side_effect = req.exceptions.HTTPError("404")
+
+        mock_get = MagicMock(side_effect=[rss_response, zip_response])
+        with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get", mock_get):
+            chunks = fetch_court_via_rss("BGH")
+
+        assert chunks == []
+
+    def test_skips_non_xml_files_in_zip(self):
         zip_bytes = _make_zip(("readme.txt", b"ignore me"), ("case.xml", SAMPLE_XML))
-        mock_response = MagicMock()
-        mock_response.content = zip_bytes
-        mock_response.raise_for_status = MagicMock()
+        mock_get = _rss_then_zip_mock(SAMPLE_RSS, zip_bytes)
 
-        with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get",
-                   return_value=mock_response):
-            chunks = fetch_court_xml_zip("BAG")
+        with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get", mock_get):
+            chunks = fetch_court_via_rss("BAG")
+
         assert len(chunks) == 2  # only from case.xml
 
-    def test_http_error_propagates(self):
+    def test_rss_http_error_propagates(self):
         import requests as req
 
         mock_response = MagicMock()
@@ -171,7 +220,21 @@ class TestFetchCourtXmlZip:
         with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get",
                    return_value=mock_response):
             with pytest.raises(req.exceptions.HTTPError, match="503"):
-                fetch_court_xml_zip("BFH")
+                fetch_court_via_rss("BFH")
+
+    def test_empty_rss_feed_returns_empty_list(self):
+        empty_rss = b"""<?xml version='1.0' encoding='UTF-8'?>
+<rss version='2.0'><channel><title>BGH</title></channel></rss>"""
+
+        rss_response = MagicMock()
+        rss_response.content = empty_rss
+        rss_response.raise_for_status = MagicMock()
+
+        with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get",
+                   return_value=rss_response):
+            chunks = fetch_court_via_rss("BGH")
+
+        assert chunks == []
 
 
 class TestRechtsprechungImInternetProvider:
@@ -188,28 +251,23 @@ class TestRechtsprechungImInternetProvider:
         for court in ("BGH", "BVERFG", "BAG", "BFH", "BVERWG", "BPATG"):
             assert court in p.supported_courts
 
-    def test_fetch_court_delegates_to_fetch_court_xml_zip(self):
+    def test_fetch_court_uses_rss_approach(self):
         p = RechtsprechungImInternetProvider()
         zip_bytes = _make_zip(("c.xml", SAMPLE_XML))
-        mock_response = MagicMock()
-        mock_response.content = zip_bytes
-        mock_response.raise_for_status = MagicMock()
+        mock_get = _rss_then_zip_mock(SAMPLE_RSS, zip_bytes)
 
-        with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get",
-                   return_value=mock_response):
+        with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get", mock_get):
             chunks = p.fetch_court("BGH")
+
         assert len(chunks) == 2
         assert all("court" in c for c in chunks)
 
     def test_fetch_court_result_has_required_keys(self):
         p = RechtsprechungImInternetProvider()
         zip_bytes = _make_zip(("c.xml", SAMPLE_XML))
-        mock_response = MagicMock()
-        mock_response.content = zip_bytes
-        mock_response.raise_for_status = MagicMock()
+        mock_get = _rss_then_zip_mock(SAMPLE_RSS, zip_bytes)
 
-        with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get",
-                   return_value=mock_response):
+        with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get", mock_get):
             chunks = p.fetch_court("BVERFG")
 
         required = {"court", "date", "az", "type", "text", "chunk_type", "laws_cited", "url"}

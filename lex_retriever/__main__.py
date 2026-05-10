@@ -76,7 +76,7 @@ def main():
 
     elif cmd == "status":
         from .providers import REGISTRY
-        from .indexer import get_indexed_law_counts, CHROMA_PATH
+        from .indexer import get_indexed_law_counts, LANCE_PATH
 
         indexed = get_indexed_law_counts()
 
@@ -85,7 +85,7 @@ def main():
             for law in provider.available_laws():
                 all_available.add(law["code"].upper())
 
-        print(f"Local DB: {CHROMA_PATH}")
+        print(f"Local DB: {LANCE_PATH}")
         if not indexed:
             print("Indexed laws: 0  (run `python -m lex_retriever index-all` to populate)")
         else:
