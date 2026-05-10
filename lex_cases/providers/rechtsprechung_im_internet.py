@@ -1,4 +1,10 @@
-"""Provider for rechtsprechung-im-internet.de — XML-ZIP download and parser."""
+"""Provider for rechtsprechung-im-internet.de.
+
+Bulk-ZIP approach (/{court}/xml.zip) is blocked by the server and returns HTML.
+Instead we: (1) parse the RSS feed to enumerate recent doc-IDs, then (2) fetch
+each individual ZIP at /jportal/docs/bsjrs/{doc_id}.zip.
+This covers the ~200 most recent decisions per court per feed poll.
+"""
 
 from __future__ import annotations
 
@@ -25,19 +31,15 @@ _COURT_CATALOG: dict[str, tuple[str, str]] = {
 }
 
 _BASE_URL = "https://www.rechtsprechung-im-internet.de"
-
-
-def _xml_zip_url(slug: str) -> str:
-    return f"{_BASE_URL}/{slug}/xml.zip"
+_RSS_URL = f"{_BASE_URL}/jportal/docs/feed/bsjrs-{{slug}}.xml"
+_CASE_ZIP_URL = f"{_BASE_URL}/jportal/docs/bsjrs/{{doc_id}}.zip"
 
 
 def _strip_ns(tag: str) -> str:
-    """Remove XML namespace prefix from a tag name."""
     return re.sub(r"^\{[^}]+\}", "", tag)
 
 
 def _find_text(root: ET.Element, local_tag: str) -> str:
-    """Find first element matching local_tag (ignoring namespace) and return its full text."""
     for elem in root.iter():
         if _strip_ns(elem.tag) == local_tag:
             return " ".join(elem.itertext()).strip()
@@ -45,18 +47,18 @@ def _find_text(root: ET.Element, local_tag: str) -> str:
 
 
 def _parse_xml_file(xml_bytes: bytes, filename: str) -> list[dict]:
-    """Parse one XML file from the ZIP; return zero or more case chunk dicts."""
+    """Parse one case XML file; return zero or more chunk dicts."""
     try:
         root = ET.fromstring(xml_bytes)
     except ET.ParseError:
         return []
 
     doknr = _find_text(root, "doknr") or os.path.splitext(os.path.basename(filename))[0]
-    court = _find_text(root, "gericht")
-    date = _find_text(root, "entscheidungsdatum")
+    court = _find_text(root, "gertyp") or _find_text(root, "gericht")
+    date = _find_text(root, "entsch-datum") or _find_text(root, "entscheidungsdatum")
     az = _find_text(root, "aktenzeichen")
-    doc_type = _find_text(root, "dokumenttyp")
-    normkette = _find_text(root, "normkette")
+    doc_type = _find_text(root, "doktyp") or _find_text(root, "dokumenttyp")
+    normkette = _find_text(root, "norm") or _find_text(root, "normkette")
     url = f"{_BASE_URL}/jportal/?docid={doknr}"
 
     laws_cited = extract_references(normkette) if normkette else []
@@ -89,33 +91,73 @@ def _parse_xml_file(xml_bytes: bytes, filename: str) -> list[dict]:
     retry=retry_if_exception_type(requests.exceptions.RequestException),
     reraise=True,
 )
-def fetch_court_xml_zip(court: str) -> list[dict]:
-    """Download XML-ZIP for a court and return parsed case dicts."""
+def _fetch_rss_doc_ids(slug: str) -> list[str]:
+    """Return list of doc-IDs from the RSS feed for a court slug."""
+    url = _RSS_URL.format(slug=slug)
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+    root = ET.fromstring(response.content)
+    doc_ids: list[str] = []
+    for item in root.findall(".//item"):
+        guid = item.find("guid")
+        if guid is not None and guid.text:
+            doc_ids.append(guid.text.strip())
+    return doc_ids
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type(requests.exceptions.RequestException),
+    reraise=True,
+)
+def _fetch_case_zip(doc_id: str) -> list[dict]:
+    """Download individual case ZIP and return parsed chunk dicts."""
+    url = _CASE_ZIP_URL.format(doc_id=doc_id)
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+    chunks: list[dict] = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+            for name in zf.namelist():
+                if name.lower().endswith(".xml"):
+                    with zf.open(name) as f:
+                        chunks.extend(_parse_xml_file(f.read(), name))
+    except zipfile.BadZipFile:
+        pass
+    return chunks
+
+
+def fetch_court_via_rss(court: str) -> list[dict]:
+    """Fetch recent decisions for a court via RSS feed + per-case ZIPs."""
     code = court.upper()
     entry = _COURT_CATALOG.get(code)
     if not entry:
         raise ValueError(f"Court '{court}' not in catalog; supported: {list(_COURT_CATALOG)}")
 
     _, slug = entry
-    url = _xml_zip_url(slug)
-    response = requests.get(url, timeout=60)
-    response.raise_for_status()
+    doc_ids = _fetch_rss_doc_ids(slug)
 
     chunks: list[dict] = []
-    with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
-        for name in zf.namelist():
-            if name.lower().endswith(".xml"):
-                with zf.open(name) as f:
-                    chunks.extend(_parse_xml_file(f.read(), name))
+    for doc_id in doc_ids:
+        try:
+            chunks.extend(_fetch_case_zip(doc_id))
+        except Exception:
+            continue
 
     return chunks
 
 
 class RechtsprechungImInternetProvider(CaseProvider):
-    """Fetches German federal court decisions from rechtsprechung-im-internet.de."""
+    """Fetches recent German federal court decisions via RSS feed + per-case ZIPs.
+
+    The court-level xml.zip endpoint is blocked by the server (returns HTML).
+    This provider uses the RSS feed to enumerate recent doc-IDs and downloads
+    each decision individually from /jportal/docs/bsjrs/{doc_id}.zip.
+    """
 
     name = "rechtsprechung-im-internet"
     supported_courts = list(_COURT_CATALOG)
 
     def fetch_court(self, court: str) -> list[dict]:
-        return fetch_court_xml_zip(court)
+        return fetch_court_via_rss(court)

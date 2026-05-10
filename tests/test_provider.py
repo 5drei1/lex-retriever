@@ -12,8 +12,9 @@ import requests
 
 from lex_cases.providers.rechtsprechung_im_internet import (
     _COURT_CATALOG,
+    _fetch_rss_doc_ids,
     _parse_xml_file,
-    fetch_court_xml_zip,
+    fetch_court_via_rss,
 )
 
 _FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -119,12 +120,25 @@ class TestParseXmlFileWithFixture:
             assert required.issubset(chunk.keys()), f"Missing: {required - chunk.keys()}"
 
 
-class TestFetchCourtXmlZipRetry:
-    """Verify that fetch_court_xml_zip retries on transient network errors."""
+_SAMPLE_RSS = b"""<?xml version='1.0' encoding='UTF-8'?>
+<rss version='2.0'>
+<channel>
+  <title>BGH-Rechtsprechung</title>
+  <item>
+    <title>BGH, Urteil 2024-03-15, VI ZR 123/23</title>
+    <guid isPermaLink="false">jb-KORE300042024</guid>
+  </item>
+</channel>
+</rss>
+"""
 
-    def _good_response(self) -> MagicMock:
+
+class TestFetchRssRetry:
+    """Verify that _fetch_rss_doc_ids retries on transient network errors."""
+
+    def _rss_response(self) -> MagicMock:
         resp = MagicMock()
-        resp.content = _make_zip_from_fixture("bgh_sample.xml")
+        resp.content = _SAMPLE_RSS
         resp.raise_for_status = MagicMock()
         return resp
 
@@ -136,27 +150,27 @@ class TestFetchCourtXmlZipRetry:
             call_count += 1
             if call_count < 3:
                 raise requests.exceptions.ConnectionError("transient error")
-            return self._good_response()
+            return self._rss_response()
 
         with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get",
                    side_effect=_side_effect), \
              patch("time.sleep"):
-            chunks = fetch_court_xml_zip("BGH")
+            doc_ids = _fetch_rss_doc_ids("bgh")
 
         assert call_count == 3
-        assert len(chunks) > 0
+        assert doc_ids == ["jb-KORE300042024"]
 
     def test_fails_after_three_consecutive_errors(self):
         with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get",
                    side_effect=requests.exceptions.ConnectionError("always fails")), \
              patch("time.sleep"):
             with pytest.raises(requests.exceptions.ConnectionError):
-                fetch_court_xml_zip("BGH")
+                _fetch_rss_doc_ids("bgh")
 
     def test_first_attempt_success_no_retry(self):
         with patch("lex_cases.providers.rechtsprechung_im_internet.requests.get",
-                   return_value=self._good_response()) as mock_get:
-            chunks = fetch_court_xml_zip("BGH")
+                   return_value=self._rss_response()) as mock_get:
+            doc_ids = _fetch_rss_doc_ids("bgh")
 
         assert mock_get.call_count == 1
-        assert chunks
+        assert "jb-KORE300042024" in doc_ids
