@@ -1,5 +1,7 @@
 """Provider for rechtsprechung-im-internet.de.
 
+DEPRECATED: Use NeurisCasesProvider (neuris_cases_provider.py) instead.
+
 Bulk-ZIP approach (/{court}/xml.zip) is blocked by the server and returns HTML.
 Instead we: (1) parse the RSS feed to enumerate recent doc-IDs, then (2) fetch
 each individual ZIP at /jportal/docs/bsjrs/{doc_id}.zip.
@@ -154,10 +156,21 @@ class RechtsprechungImInternetProvider(CaseProvider):
     The court-level xml.zip endpoint is blocked by the server (returns HTML).
     This provider uses the RSS feed to enumerate recent doc-IDs and downloads
     each decision individually from /jportal/docs/bsjrs/{doc_id}.zip.
+
+    .. deprecated::
+        Use NeurisCasesProvider instead.
     """
 
     name = "rechtsprechung-im-internet"
     supported_courts = list(_COURT_CATALOG)
+
+    def __init__(self) -> None:
+        import warnings
+        warnings.warn(
+            "RechtsprechungImInternetProvider is deprecated; use NeurisCasesProvider instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     def fetch_court(self, court: str) -> list[dict]:
         return fetch_court_via_rss(court)
