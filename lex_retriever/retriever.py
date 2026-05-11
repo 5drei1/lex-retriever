@@ -8,7 +8,11 @@ appropriate provider using the law abbreviation stored in `law`.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
+
+# Matches chunked paragraph keys produced by the indexer: "§ 123 [1/2]"
+_CHUNK_RE = re.compile(r"^(.*) \[(\d+)/(\d+)\]$")
 
 import lancedb
 
@@ -58,7 +62,22 @@ class LexRetriever:
         """Return the text for a specific paragraph, fetching from provider if needed."""
         if law_code not in self._text_cache:
             self._text_cache[law_code] = _build_text_index(law_code)
-        return self._text_cache[law_code].get(paragraph, "")
+        cache = self._text_cache[law_code]
+        text = cache.get(paragraph, "")
+        if text:
+            return text
+        # Providers return base keys (e.g. "§ 123") but the indexer stores chunked
+        # keys (e.g. "§ 123 [1/2]"). Re-apply the same chunking to find the sub-chunk.
+        m = _CHUNK_RE.match(paragraph)
+        if m:
+            base, chunk_idx = m.group(1), int(m.group(2)) - 1
+            base_text = cache.get(base, "")
+            if base_text:
+                from .indexer import chunk_text
+                sub_chunks = chunk_text(base_text)
+                if 0 <= chunk_idx < len(sub_chunks):
+                    return sub_chunks[chunk_idx]
+        return ""
 
     def search(self, query: str, laws: list[str] | None = None, top_k: int = 10) -> list[dict]:
         table = self._get_table()
