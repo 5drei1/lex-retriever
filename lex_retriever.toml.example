@@ -18,6 +18,19 @@ active = [
     "ZPO",
 ]
 
+[neuris]
+# NeuRIS API (testphase.rechtsinformationen.bund.de) — public, no auth needed.
+# transport: "testphase" (default) or "production" (not yet live, raises error).
+transport = "testphase"
+# If a future transport requires an API key, set the env-var name here:
+# api_key_env = "NEURIS_API_KEY"   # then: export NEURIS_API_KEY=<your-key>
+
+[cellar]
+# EUR-Lex CELLAR — public SPARQL + HTML, no key needed for standard access.
+# High-volume commercial access may require a key.
+endpoint = "https://publications.europa.eu/webapi/rdf/sparql"
+# api_key_env = "CELLAR_API_KEY"   # then: export CELLAR_API_KEY=<your-key>
+
 [embedding]
 # Embedding provider — controls how text is turned into vectors.
 # Changing the provider requires a full re-index: python -m lex_retriever index-all --force

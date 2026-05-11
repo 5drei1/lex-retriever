@@ -4,4 +4,4 @@ requests>=2.31.0,<3.0
 lxml>=4.9.0,<6.0
 tenacity>=8.0,<10.0
 SPARQLWrapper>=2.0.0,<3.0
--e ./neuris-python
+neuris-python @ git+https://github.com/5drei1/neuris-python.git
