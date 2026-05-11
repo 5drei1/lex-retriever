@@ -1,0 +1,141 @@
+"""NeuRIS law provider — fetches German federal legislation via neuris-python."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from neuris import NeuRISClient
+from neuris.exceptions import NeuRISError, NeuRISNotFoundError
+from neuris.transport import NeuRISTransport, TestphaseTransport
+
+from .base import LawProvider
+
+
+def _eli_path(eli: str) -> str:
+    """Strip the leading 'eli/' prefix for use in transport GET paths."""
+    stripped = eli.lstrip("/")
+    if stripped.startswith("eli/"):
+        stripped = stripped[4:]
+    return stripped
+
+
+def _extract_text(raw: dict[str, Any]) -> str:
+    """Extract text content from a raw NeuRIS legislation part response.
+
+    Tries multiple field names because the testphase API schema is not yet stable.
+    Falls back to official_long_title or name as a last resort.
+    """
+    for field in ("text", "content", "htmlText", "normtext", "body"):
+        val = raw.get(field)
+        if val and isinstance(val, str):
+            return val.strip()
+    # Nested structure: some responses wrap text in a sub-object
+    for field in ("textContent", "articleContent", "legislationText"):
+        nested = raw.get(field)
+        if isinstance(nested, dict):
+            for sub in ("text", "content", "value"):
+                val = nested.get(sub)
+                if val and isinstance(val, str):
+                    return val.strip()
+    # Last resort: the official long title contains substantive description
+    return (raw.get("officialLongTitle") or "").strip()
+
+
+class NeuRISProvider(LawProvider):
+    """Fetches German federal legislation from the NeuRIS testphase API.
+
+    Uses neuris-python as the HTTP client. The `source` field in returned
+    chunks is the ELI (European Legislation Identifier) of the law part.
+
+    Args:
+        transport: Optional NeuRISTransport for testing/overriding.
+                   Defaults to TestphaseTransport (live testphase API).
+    """
+
+    name = "neuris"
+    supported_laws: list[str] = []  # dynamic — is_available queries the API
+
+    def __init__(self, transport: NeuRISTransport | None = None) -> None:
+        self._transport = transport or TestphaseTransport()
+        self._client = NeuRISClient(transport=self._transport)
+
+    def is_available(self, law_code: str) -> bool:
+        """Check availability by searching NeuRIS for an exact abbreviation match."""
+        try:
+            page = self._client.search_legislation(search_term=law_code, size=10)
+            for result in page.members:
+                if result.item.abbreviation.upper() == law_code.upper():
+                    return True
+        except NeuRISError:
+            pass
+        return False
+
+    def available_laws(self) -> list[dict]:
+        """Return all laws known to NeuRIS (auto-paginated)."""
+        laws: list[dict] = []
+        seen: set[str] = set()
+        try:
+            for result in self._client.search_legislation_iter():
+                item = result.item
+                key = item.abbreviation.upper()
+                if key and key not in seen:
+                    seen.add(key)
+                    laws.append({
+                        "code": item.abbreviation,
+                        "full_name": item.name,
+                        "url": item.legislation_identifier,
+                    })
+        except NeuRISError:
+            pass
+        return laws
+
+    def fetch(self, law_code: str) -> list[dict]:
+        """Fetch all paragraph chunks for the given law code.
+
+        Returns:
+            List of dicts with keys: paragraph, text, source (ELI).
+
+        Raises:
+            ValueError: If the law is not found in NeuRIS.
+        """
+        code = law_code.upper()
+
+        # Step 1: find the law by abbreviation
+        page = self._client.search_legislation(search_term=law_code, size=20)
+        law = None
+        for result in page.members:
+            if result.item.abbreviation.upper() == code:
+                law = result.item
+                break
+
+        if law is None:
+            raise ValueError(f"Law '{law_code}' not found in NeuRIS")
+
+        # Step 2: fetch the full legislation record to get all parts
+        try:
+            full_law = self._client.get_legislation_by_eli(law.legislation_identifier)
+        except NeuRISNotFoundError:
+            full_law = law
+
+        # Step 3: for each part, fetch raw data and extract text
+        chunks: list[dict] = []
+        for part in full_law.has_part:
+            try:
+                raw = self._transport.get(f"/legislation/eli/{_eli_path(part.eli)}")
+            except NeuRISError:
+                continue
+
+            text = _extract_text(raw)
+            if not text:
+                continue
+
+            # Use the last ELI segment as the paragraph identifier
+            paragraph = raw.get("name") or raw.get("abbreviation") or part.eli.split("/")[-1]
+
+            chunks.append({
+                "paragraph": str(paragraph),
+                "text": text,
+                "source": part.eli,
+            })
+
+        return chunks
