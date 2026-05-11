@@ -21,7 +21,11 @@ def _det_vector(text: str) -> list[float]:
 
 @pytest.fixture
 def _gmbhg_collection(tmp_path):
-    """LanceDB table with GmbHG chunks; patches LexRetriever._get_table and get_embedding_provider."""
+    """LanceDB table with GmbHG chunks (ref_id schema, no stored text).
+
+    Patches LexRetriever._get_table, get_embedding_provider, and
+    _lex_retriever.retriever._fetch_law_chunks to avoid network calls.
+    """
     import lancedb
 
     texts = [
@@ -29,14 +33,15 @@ def _gmbhg_collection(tmp_path):
         "Die Gesellschafter der GmbH bestellen den Geschäftsführer durch Beschluss.",
         "Der Geschäftsführer vertritt die Gesellschaft gerichtlich und außergerichtlich.",
     ]
+    paragraphs = ["§ 6 Abs. 1", "§ 6 Abs. 2", "§ 35 Abs. 1"]
 
     rows = [
-        {"id": "gmbhg-1", "law": "GMBHG", "paragraph": "§ 6 Abs. 1",
-         "text": texts[0], "source": "test", "vector": _det_vector(texts[0])},
-        {"id": "gmbhg-2", "law": "GMBHG", "paragraph": "§ 6 Abs. 2",
-         "text": texts[1], "source": "test", "vector": _det_vector(texts[1])},
-        {"id": "gmbhg-3", "law": "GMBHG", "paragraph": "§ 35 Abs. 1",
-         "text": texts[2], "source": "test", "vector": _det_vector(texts[2])},
+        {"id": "gmbhg-1", "law": "GMBHG", "paragraph": paragraphs[0],
+         "ref_id": "gesetze-im-internet.de/GMBHG", "vector": _det_vector(texts[0])},
+        {"id": "gmbhg-2", "law": "GMBHG", "paragraph": paragraphs[1],
+         "ref_id": "gesetze-im-internet.de/GMBHG", "vector": _det_vector(texts[1])},
+        {"id": "gmbhg-3", "law": "GMBHG", "paragraph": paragraphs[2],
+         "ref_id": "gesetze-im-internet.de/GMBHG", "vector": _det_vector(texts[2])},
     ]
 
     db = lancedb.connect(str(tmp_path))
@@ -46,10 +51,17 @@ def _gmbhg_collection(tmp_path):
         def embed(self, texts: list[str]) -> list[list[float]]:
             return [_det_vector(t) for t in texts]
 
+    # Provide on-demand text without network calls
+    fake_chunks = [
+        {"paragraph": p, "text": t, "source": "gesetze-im-internet.de/GMBHG"}
+        for p, t in zip(paragraphs, texts)
+    ]
+
     from lex_retriever.retriever import LexRetriever
 
     with patch.object(LexRetriever, "_get_table", return_value=table), \
          patch("lex_retriever.retriever.get_embedding_provider", return_value=_MockEmbedder()), \
+         patch("lex_retriever.retriever._fetch_law_chunks", return_value=fake_chunks), \
          patch("lex_retriever.tool._load_embedding_config", return_value={}):
         yield
 
@@ -98,6 +110,103 @@ def test_import_works():
     assert callable(search_law)
     assert callable(index_law)
     assert callable(index_all_laws)
+
+
+# ---------------------------------------------------------------------------
+# On-demand text fetching — new ref_id schema
+# ---------------------------------------------------------------------------
+
+class TestOnDemandTextFetching:
+    """Verify that LexRetriever fetches text on demand via _fetch_law_chunks."""
+
+    def _make_retriever_with_table(self, rows):
+        """Return a LexRetriever backed by in-memory table rows (no LanceDB disk I/O)."""
+        from unittest.mock import MagicMock
+        from lex_retriever.retriever import LexRetriever
+
+        class _MockQuery:
+            def __init__(self, data):
+                self._data = data
+
+            def search(self, *args, **kwargs): return self
+            def where(self, clause):
+                # Very minimal WHERE filtering for law equality
+                if "law = " in clause:
+                    law = clause.split("'")[1]
+                    self._data = [r for r in self._data if r.get("law") == law]
+                return self
+
+            def limit(self, n): return self
+            def to_list(self): return list(self._data)
+
+        class _MockEmbedder:
+            def embed(self, texts): return [_det_vector(t) for t in texts]
+
+        r = LexRetriever.__new__(LexRetriever)
+        r._lance_path = "/tmp/test"
+        r._embedding_config = None
+        r._table = _MockQuery(rows)
+        r._embedder = _MockEmbedder()
+        r._text_cache = {}
+        return r
+
+    def test_search_fetches_text_on_demand(self):
+        from unittest.mock import patch
+
+        rows = [{"law": "TESTLAW", "paragraph": "§ 1",
+                 "ref_id": "gesetze-im-internet.de/TESTLAW", "_distance": 0.2}]
+        fake_chunks = [{"paragraph": "§ 1", "text": "Gesetzestext §1", "source": "x"}]
+
+        r = self._make_retriever_with_table(rows)
+
+        with patch("lex_retriever.retriever.expand_query", return_value="test"), \
+             patch("lex_retriever.retriever._fetch_law_chunks", return_value=fake_chunks):
+            results = r.search("test", laws=["TESTLAW"])
+
+        assert results
+        assert results[0]["text"] == "Gesetzestext §1"
+        assert results[0]["law"] == "TESTLAW"
+
+    def test_search_result_contains_ref_id(self):
+        from unittest.mock import patch
+
+        rows = [{"law": "TESTLAW", "paragraph": "§ 2",
+                 "ref_id": "gesetze-im-internet.de/TESTLAW", "_distance": 0.1}]
+        fake_chunks = [{"paragraph": "§ 2", "text": "Text §2", "source": "x"}]
+
+        r = self._make_retriever_with_table(rows)
+
+        with patch("lex_retriever.retriever.expand_query", return_value="test"), \
+             patch("lex_retriever.retriever._fetch_law_chunks", return_value=fake_chunks):
+            results = r.search("test", laws=["TESTLAW"])
+
+        assert results
+        assert results[0].get("ref_id") == "gesetze-im-internet.de/TESTLAW"
+
+    def test_text_cached_per_law(self):
+        """_fetch_law_chunks should only be called once per law, even for multiple results."""
+        from unittest.mock import patch, MagicMock
+
+        rows = [
+            {"law": "TESTLAW", "paragraph": "§ 1",
+             "ref_id": "gesetze-im-internet.de/TESTLAW", "_distance": 0.1},
+            {"law": "TESTLAW", "paragraph": "§ 2",
+             "ref_id": "gesetze-im-internet.de/TESTLAW", "_distance": 0.2},
+        ]
+        fake_chunks = [
+            {"paragraph": "§ 1", "text": "Text §1", "source": "x"},
+            {"paragraph": "§ 2", "text": "Text §2", "source": "x"},
+        ]
+
+        r = self._make_retriever_with_table(rows)
+        fetch_mock = MagicMock(return_value=fake_chunks)
+
+        with patch("lex_retriever.retriever.expand_query", return_value="test"), \
+             patch("lex_retriever.retriever._fetch_law_chunks", fetch_mock):
+            results = r.search("test", laws=["TESTLAW"])
+
+        assert len(results) == 2
+        fetch_mock.assert_called_once_with("TESTLAW")
 
 
 # ---------------------------------------------------------------------------

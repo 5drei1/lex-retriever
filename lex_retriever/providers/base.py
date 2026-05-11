@@ -14,6 +14,14 @@ class LawProvider(ABC):
         Returns list of dicts: { paragraph, text, source }
         """
 
+    def fetch_text(self, ref_id: str, paragraph: str) -> str:
+        """Fetch text for a single paragraph on demand by its ref_id.
+
+        Override in subclasses for efficient single-paragraph retrieval.
+        Default returns empty string — subclasses should override.
+        """
+        return ""
+
     def available_laws(self) -> list[dict]:
         """Return ALL laws this provider can theoretically supply.
 

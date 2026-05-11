@@ -1,7 +1,8 @@
-"""Unit tests for indexer chunking logic."""
+"""Unit tests for indexer chunking logic and schema."""
 
 import hashlib
 import logging
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -109,6 +110,84 @@ class TestChunkTextWarning:
 
         assert any("split into" in r.message for r in caplog.records)
         assert any("128-token" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# lex_retriever.indexer — schema: ref_id, no text stored
+# ---------------------------------------------------------------------------
+
+
+class TestIndexLawSchema:
+    """Verify index_law writes {id, law, paragraph, ref_id, vector} — no text or source."""
+
+    def _make_provider(self, chunks):
+        class _FakeProvider:
+            name = "fake"
+            def is_available(self, code): return True
+            def fetch(self, code): return chunks
+
+        return _FakeProvider()
+
+    def test_stored_rows_have_ref_id_not_text(self):
+        from lex_retriever.indexer import index_law
+
+        chunks = [
+            {"paragraph": "§ 1", "text": "Ein Gesetz.", "source": "gesetze-im-internet.de/TLAW"},
+        ]
+        captured: list[dict] = []
+
+        class _Embedder:
+            def embed(self, texts): return [[0.0] * 4 for _ in texts]
+
+        mock_db = MagicMock()
+        mock_db.table_names.return_value = []
+        mock_db.create_table.side_effect = lambda name, data: (captured.extend(data), MagicMock())[1]
+
+        with patch("lex_retriever.indexer.lancedb.connect", return_value=mock_db), \
+             patch("lex_retriever.indexer.get_embedding_provider", return_value=_Embedder()), \
+             patch("lex_retriever.indexer.get_providers_for_law",
+                   return_value=[self._make_provider(chunks)]), \
+             patch("lex_retriever.indexer.os.makedirs"):
+            index_law("TLAW")
+
+        assert captured, "no rows written"
+        row = captured[0]
+        assert "ref_id" in row, "ref_id missing from stored row"
+        assert "text" not in row, "text must not be stored in LanceDB"
+        assert "source" not in row, "source must not be stored in LanceDB"
+        assert row["ref_id"] == "gesetze-im-internet.de/TLAW"
+        assert "vector" in row
+        assert row["law"] == "TLAW"
+        assert row["paragraph"] == "§ 1"
+
+    def test_embedding_uses_original_text(self):
+        """Embedding is computed from the original chunk text even though it's not stored."""
+        from lex_retriever.indexer import index_law
+
+        embedded_texts: list[list[str]] = []
+
+        chunks = [
+            {"paragraph": "§ 1", "text": "Gesetzestext", "source": "src/TLAW2"},
+        ]
+
+        class _Embedder:
+            def embed(self, texts):
+                embedded_texts.append(list(texts))
+                return [[0.0] * 4 for _ in texts]
+
+        mock_db = MagicMock()
+        mock_db.table_names.return_value = []
+        mock_db.create_table.return_value = MagicMock()
+
+        with patch("lex_retriever.indexer.lancedb.connect", return_value=mock_db), \
+             patch("lex_retriever.indexer.get_embedding_provider", return_value=_Embedder()), \
+             patch("lex_retriever.indexer.get_providers_for_law",
+                   return_value=[self._make_provider(chunks)]), \
+             patch("lex_retriever.indexer.os.makedirs"):
+            index_law("TLAW2")
+
+        assert embedded_texts, "embedder never called"
+        assert "Gesetzestext" in embedded_texts[0]
 
 
 # ---------------------------------------------------------------------------

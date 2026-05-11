@@ -145,3 +145,14 @@ class GesetzImInternetProvider(LawProvider):
                         chunks.extend(_parse_gii_xml(f.read(), code))
 
         return chunks
+
+    def fetch_text(self, ref_id: str, paragraph: str) -> str:
+        # ref_id format: "gesetze-im-internet.de/{LAW_CODE}"
+        try:
+            law_code = ref_id.split("/")[-1]
+            for chunk in self.fetch(law_code):
+                if chunk["paragraph"] == paragraph:
+                    return chunk["text"]
+        except Exception:
+            pass
+        return ""
