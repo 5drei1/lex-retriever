@@ -73,6 +73,8 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
 
     indexed_chunks = []
     for chunk in raw_chunks:
+        # Use chunk text only for embedding — text is NOT stored in LanceDB.
+        # ref_id stores the ELI/CELEX/source identifier for on-demand text retrieval.
         sub_chunks = chunk_text(chunk["text"])
         for idx, sub_text in enumerate(sub_chunks):
             paragraph = (
@@ -83,11 +85,11 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
                 "id":        _chunk_id(law_code, paragraph, idx),
                 "law":       law_code.upper(),
                 "paragraph": paragraph,
-                "text":      sub_text,
-                "source":    chunk["source"],
+                "ref_id":    chunk["source"],   # ELI / CELEX / source identifier
+                "_embed_text": sub_text,         # temporary — used for embedding only
             })
 
-    texts = [c["text"] for c in indexed_chunks]
+    texts = [c.pop("_embed_text") for c in indexed_chunks]
     vectors = embedder.embed(texts)
 
     rows = [{**chunk, "vector": vector} for chunk, vector in zip(indexed_chunks, vectors)]
@@ -97,7 +99,6 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
     batch_size = 32
 
     if table is None:
-        # Create table from first batch; schema inferred → FixedSizeList for vector column
         table = db.create_table(TABLE_NAME, data=rows[:batch_size])
         for start in range(batch_size, len(rows), batch_size):
             table.add(rows[start:start + batch_size])

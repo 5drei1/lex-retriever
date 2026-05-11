@@ -1,15 +1,42 @@
-"""Retriever: semantic search over LanceDB-indexed law paragraphs."""
+"""Retriever: semantic search over LanceDB-indexed law paragraphs.
+
+LanceDB stores only embeddings + ref_id (no full text). After a vector
+search returns candidate chunks, text is fetched on-demand from the
+appropriate provider using the law abbreviation stored in `law`.
+"""
 
 from __future__ import annotations
 
 import os
+from typing import Any
+
 import lancedb
 
 from .embeddings import get_embedding_provider
+from .providers import get_providers_for_law
 from .query_expansion import expand_query
 
 LANCE_PATH = os.environ.get("LANCE_PATH", os.path.join(os.path.dirname(__file__), "..", "lancedb"))
 TABLE_NAME = "german_law"
+
+
+def _fetch_law_chunks(law_code: str) -> list[dict]:
+    """Return all raw chunks for a law from the first available provider."""
+    providers = get_providers_for_law(law_code)
+    for provider in providers:
+        try:
+            return provider.fetch(law_code)
+        except Exception:
+            continue
+    return []
+
+
+def _build_text_index(law_code: str) -> dict[str, str]:
+    """Map paragraph key → text for all chunks of a law."""
+    index: dict[str, str] = {}
+    for chunk in _fetch_law_chunks(law_code):
+        index[chunk["paragraph"]] = chunk["text"]
+    return index
 
 
 class LexRetriever:
@@ -18,12 +45,20 @@ class LexRetriever:
         self._embedding_config = embedding_config
         self._table = None
         self._embedder = get_embedding_provider(embedding_config)
+        # Per-instance cache: law_code → {paragraph: text}
+        self._text_cache: dict[str, dict[str, str]] = {}
 
     def _get_table(self):
         if self._table is None:
             db = lancedb.connect(self._lance_path)
             self._table = db.open_table(TABLE_NAME)
         return self._table
+
+    def _get_text(self, law_code: str, paragraph: str) -> str:
+        """Return the text for a specific paragraph, fetching from provider if needed."""
+        if law_code not in self._text_cache:
+            self._text_cache[law_code] = _build_text_index(law_code)
+        return self._text_cache[law_code].get(paragraph, "")
 
     def search(self, query: str, laws: list[str] | None = None, top_k: int = 10) -> list[dict]:
         table = self._get_table()
@@ -42,16 +77,20 @@ class LexRetriever:
 
         results = q.limit(top_k).to_list()
 
-        return [
-            {
-                "law":            r["law"],
-                "paragraph":      r["paragraph"],
-                "text":           r["text"],
+        output = []
+        for r in results:
+            law = r["law"]
+            paragraph = r["paragraph"]
+            text = self._get_text(law, paragraph)
+            output.append({
+                "law":            law,
+                "paragraph":      paragraph,
+                "text":           text,
+                "ref_id":         r.get("ref_id", ""),
                 "score":          round(1.0 - (r["_distance"] / 2), 4),
                 "original_query": query,
-            }
-            for r in results
-        ]
+            })
+        return output
 
     def get_paragraph(self, law: str, paragraph: str) -> dict | None:
         table = self._get_table()
@@ -63,7 +102,9 @@ class LexRetriever:
         if not results:
             return None
         results.sort(key=lambda r: r["paragraph"])
-        full_text = " ".join(r["text"] for r in results)
+        # Fetch and combine text for all matching chunks on-demand
+        texts = [self._get_text(law.upper(), r["paragraph"]) for r in results]
+        full_text = " ".join(t for t in texts if t)
         return {"law": law.upper(), "paragraph": paragraph, "text": full_text, "chunks": len(results)}
 
     def get_full_law(self, law: str, offset: int = 0, limit: int = 50) -> dict:
@@ -76,7 +117,7 @@ class LexRetriever:
             .to_list()
         )
 
-        paragraph_chunks: dict[str, list] = defaultdict(list)
+        paragraph_chunks: dict[str, list[Any]] = defaultdict(list)
         for row in results:
             paragraph_chunks[row["paragraph"]].append(row)
 
@@ -86,8 +127,7 @@ class LexRetriever:
 
         paragraphs = []
         for para_key in page:
-            chunks = sorted(paragraph_chunks[para_key], key=lambda r: r["paragraph"])
-            text = " ".join(r["text"] for r in chunks)
+            text = self._get_text(law.upper(), para_key)
             paragraphs.append({"paragraph": para_key, "text": text})
 
         return {

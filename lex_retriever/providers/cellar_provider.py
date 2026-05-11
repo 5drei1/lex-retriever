@@ -128,3 +128,16 @@ class CellarProvider(LawProvider):
         response = requests.get(url, timeout=60, headers=_HEADERS)
         response.raise_for_status()
         return _parse_cellar_html(response.text, celex)
+
+    def fetch_text(self, ref_id: str, paragraph: str) -> str:
+        # ref_id is the CELEX number (same for all articles of a regulation)
+        try:
+            law_code = next((k for k, v in _CELEX_MAP.items() if v == ref_id), None)
+            if not law_code:
+                return ""
+            for chunk in self.fetch(law_code):
+                if chunk["paragraph"] == paragraph:
+                    return chunk["text"]
+        except Exception:
+            pass
+        return ""

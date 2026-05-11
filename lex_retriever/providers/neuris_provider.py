@@ -139,3 +139,11 @@ class NeuRISProvider(LawProvider):
             })
 
         return chunks
+
+    def fetch_text(self, ref_id: str, paragraph: str) -> str:
+        # ref_id is the ELI of the specific legislation part
+        try:
+            raw = self._transport.get(f"/legislation/eli/{_eli_path(ref_id)}")
+            return _extract_text(raw)
+        except NeuRISError:
+            return ""
