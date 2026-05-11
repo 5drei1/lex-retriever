@@ -13,6 +13,10 @@ __pycache__/
 *.egg-info/
 .env
 
+# neuris-python local dev checkout (use git+ URL in requirements.txt for CI)
+neuris-python/
+pytest_output.txt
+
 # Tools
 .pytest_cache/
 .venv/
