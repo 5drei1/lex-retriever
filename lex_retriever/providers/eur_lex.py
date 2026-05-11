@@ -1,4 +1,9 @@
-"""EUR-Lex provider: fetches EU regulations from the EU Publications Office Cellar API."""
+"""EUR-Lex provider: fetches EU regulations from the EU Publications Office Cellar API.
+
+.. deprecated::
+    Use :class:`~lex_retriever.providers.cellar_provider.CellarProvider` instead.
+    This module is kept for backwards compatibility only and will be removed in a future release.
+"""
 
 import re
 

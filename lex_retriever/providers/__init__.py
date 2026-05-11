@@ -8,11 +8,14 @@ To add a new provider:
 
 from .base import LawProvider
 from .gesetze_im_internet import GesetzImInternetProvider
-from .eur_lex import EurLexProvider
+from .cellar_provider import CellarProvider
+from .eur_lex import EurLexProvider  # kept for backwards compatibility; deprecated
+from .neuris_provider import NeuRISProvider
 
 REGISTRY: list[LawProvider] = [
+    NeuRISProvider(),
     GesetzImInternetProvider(),
-    EurLexProvider(),
+    CellarProvider(),
 ]
 
 
@@ -34,5 +37,13 @@ def all_supported_laws() -> list[str]:
     return result
 
 
-__all__ = ["LawProvider", "GesetzImInternetProvider", "EurLexProvider", "REGISTRY",
-           "get_providers_for_law", "all_supported_laws"]
+__all__ = [
+    "LawProvider",
+    "GesetzImInternetProvider",
+    "CellarProvider",
+    "EurLexProvider",
+    "NeuRISProvider",
+    "REGISTRY",
+    "get_providers_for_law",
+    "all_supported_laws",
+]

@@ -109,8 +109,9 @@ class TestParseCellarXhtml:
 
 
 class TestRegistryIntegration:
-    def test_eur_lex_provider_in_registry(self):
-        assert any(p.name == "eur-lex" for p in REGISTRY)
+    def test_cellar_provider_in_registry(self):
+        # EurLexProvider replaced by CellarProvider in the registry
+        assert any(p.name == "cellar" for p in REGISTRY)
 
     def test_dsgvo_in_all_supported_laws(self):
         laws = all_supported_laws()
@@ -119,4 +120,4 @@ class TestRegistryIntegration:
     def test_get_providers_for_dsgvo(self):
         providers = get_providers_for_law("DSGVO")
         assert len(providers) > 0
-        assert any(p.name == "eur-lex" for p in providers)
+        assert any(p.name == "cellar" for p in providers)

@@ -96,9 +96,9 @@ def index_cases(
 
 
 def index_court(court: str, db_path: str = LANCE_PATH, embedding_config: dict | None = None) -> int:
-    """Fetch and index all decisions for a single court."""
-    from .providers.rechtsprechung_im_internet import fetch_court_xml_zip
-    cases = fetch_court_xml_zip(court)
+    """Fetch and index all decisions for a single court via RSS provider."""
+    from .providers.rechtsprechung_im_internet import fetch_court_via_rss
+    cases = fetch_court_via_rss(court)
     return index_cases(cases, embedding_config=embedding_config, db_path=db_path)
 
 
