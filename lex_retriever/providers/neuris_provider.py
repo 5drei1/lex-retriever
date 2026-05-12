@@ -162,8 +162,11 @@ class NeuRISProvider(LawProvider):
         # Step 3: for each part, fetch raw data and extract text
         chunks: list[dict] = []
         for part in full_law.has_part:
+            part_eli = getattr(part, "eli", None)
+            if not part_eli:
+                continue
             try:
-                raw = self._transport.get(f"/legislation/eli/{_eli_path(part.eli)}")
+                raw = self._transport.get(f"/legislation/eli/{_eli_path(part_eli)}")
             except NeuRISError:
                 continue
 
@@ -173,11 +176,13 @@ class NeuRISProvider(LawProvider):
 
             # Use the last ELI segment as the paragraph identifier
             paragraph = raw.get("name") or raw.get("abbreviation") or part.eli.split("/")[-1]
+            if not raw.get("name") and not raw.get("abbreviation"):
+                paragraph = part_eli.split("/")[-1]
 
             chunks.append({
                 "paragraph": str(paragraph),
                 "text": text,
-                "source": _normalize_eli_url(part.eli),
+                "source": _normalize_eli_url(part_eli),
             })
 
         return chunks

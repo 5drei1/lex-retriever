@@ -110,9 +110,16 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
     batch_size = 32
 
     if table is None:
-        table = db.create_table(TABLE_NAME, data=rows[:batch_size])
-        for start in range(batch_size, len(rows), batch_size):
-            table.add(rows[start:start + batch_size])
+        # Re-check table existence against the fresh DB handle to avoid races or
+        # stale state between the earlier _open_table() and write phase.
+        if TABLE_NAME in db.table_names():
+            table = db.open_table(TABLE_NAME)
+            for start in range(0, len(rows), batch_size):
+                table.add(rows[start:start + batch_size])
+        else:
+            table = db.create_table(TABLE_NAME, data=rows[:batch_size])
+            for start in range(batch_size, len(rows), batch_size):
+                table.add(rows[start:start + batch_size])
     else:
         for start in range(0, len(rows), batch_size):
             table.add(rows[start:start + batch_size])

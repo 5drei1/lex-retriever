@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from unittest.mock import patch
 
 from neuris.transport import NeuRISTransport
 
@@ -185,6 +187,13 @@ class TestNeuRISProviderFetch:
             {"name": "Art. 1", "hasPart": []},  # no text field
         )
         chunks = provider.fetch("TESTG")
+        assert chunks == []
+
+    def test_fetch_skips_parts_without_eli(self, provider: NeuRISProvider, mock_transport: MockTransport):
+        _register_law(mock_transport)
+        full_law = SimpleNamespace(has_part=[SimpleNamespace(eli=None)])
+        with patch.object(provider._client, "get_legislation_by_eli", return_value=full_law):
+            chunks = provider.fetch("TESTG")
         assert chunks == []
 
 
