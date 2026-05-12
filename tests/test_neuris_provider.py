@@ -8,7 +8,7 @@ import pytest
 
 from neuris.transport import NeuRISTransport
 
-from lex_retriever.providers.neuris_provider import NeuRISProvider
+from lex_retriever.providers.neuris_provider import NeuRISProvider, _eli_path, _extract_text
 
 
 # ── Mock transport ────────────────────────────────────────────────────────────
@@ -134,7 +134,7 @@ class TestNeuRISProviderFetch:
         _register_law(mock_transport)
         chunks = provider.fetch("TESTG")
         for chunk in chunks:
-            assert chunk["source"].startswith("eli/")
+            assert chunk["source"].startswith("https://testphase.rechtsinformationen.bund.de/eli/")
 
     def test_fetch_returns_correct_text(self, provider: NeuRISProvider, mock_transport: MockTransport):
         _register_law(mock_transport)
@@ -221,6 +221,16 @@ class TestNeuRISProviderIdentity:
     def test_supported_laws_is_empty_list(self, provider: NeuRISProvider):
         # NeuRISProvider is dynamic; supported_laws is intentionally empty
         assert provider.supported_laws == []
+
+
+class TestNeuRISHelpers:
+    def test_eli_path_accepts_full_url(self):
+        path = _eli_path("https://testphase.rechtsinformationen.bund.de/eli/bgbl-1/2024/test")
+        assert path == "bgbl-1/2024/test"
+
+    def test_extract_text_uses_itertext_for_html(self):
+        text = _extract_text({"htmlText": "<p>Alpha <b>Beta</b></p><p>Gamma</p>"})
+        assert text == "Alpha Beta Gamma"
 
 
 # ── Tests: registry integration ───────────────────────────────────────────────

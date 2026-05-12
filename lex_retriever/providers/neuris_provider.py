@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from neuris import NeuRISClient
@@ -10,13 +11,43 @@ from neuris.transport import NeuRISTransport, TestphaseTransport
 
 from .base import LawProvider
 
+_WS_RE = re.compile(r"\s+")
+
+
+def _itertext(value: str) -> str:
+    """Return whitespace-normalized text, stripping markup when present."""
+    if "<" not in value and ">" not in value:
+        return value.strip()
+    try:
+        from lxml import html as lxml_html
+        root = lxml_html.fromstring(value)
+        return _WS_RE.sub(" ", " ".join(root.itertext())).strip()
+    except Exception:
+        return _WS_RE.sub(" ", re.sub(r"<[^>]+>", " ", value)).strip()
+
 
 def _eli_path(eli: str) -> str:
-    """Strip the leading 'eli/' prefix for use in transport GET paths."""
-    stripped = eli.lstrip("/")
+    """Extract API path payload from an ELI identifier or URL."""
+    stripped = eli.strip()
+    if "/eli/" in stripped:
+        stripped = stripped.split("/eli/", 1)[1]
+    stripped = stripped.lstrip("/")
     if stripped.startswith("eli/"):
         stripped = stripped[4:]
     return stripped
+
+
+def _normalize_eli_url(eli: str) -> str:
+    """Return a canonical HTTPS ELI URL."""
+    stripped = eli.strip()
+    if not stripped:
+        return stripped
+    if stripped.startswith("http://") or stripped.startswith("https://"):
+        return stripped
+    stripped = stripped.lstrip("/")
+    if not stripped.startswith("eli/"):
+        stripped = f"eli/{stripped}"
+    return f"https://testphase.rechtsinformationen.bund.de/{stripped}"
 
 
 def _extract_text(raw: dict[str, Any]) -> str:
@@ -28,7 +59,7 @@ def _extract_text(raw: dict[str, Any]) -> str:
     for field in ("text", "content", "htmlText", "normtext", "body"):
         val = raw.get(field)
         if val and isinstance(val, str):
-            return val.strip()
+            return _itertext(val)
     # Nested structure: some responses wrap text in a sub-object
     for field in ("textContent", "articleContent", "legislationText"):
         nested = raw.get(field)
@@ -36,7 +67,7 @@ def _extract_text(raw: dict[str, Any]) -> str:
             for sub in ("text", "content", "value"):
                 val = nested.get(sub)
                 if val and isinstance(val, str):
-                    return val.strip()
+                    return _itertext(val)
     # Last resort: the official long title contains substantive description
     return (raw.get("officialLongTitle") or "").strip()
 
@@ -94,7 +125,7 @@ class NeuRISProvider(LawProvider):
                     laws.append({
                         "code": item.abbreviation,
                         "full_name": item.name,
-                        "url": item.legislation_identifier,
+                        "url": _normalize_eli_url(item.legislation_identifier),
                     })
         except NeuRISError:
             pass
@@ -146,7 +177,7 @@ class NeuRISProvider(LawProvider):
             chunks.append({
                 "paragraph": str(paragraph),
                 "text": text,
-                "source": part.eli,
+                "source": _normalize_eli_url(part.eli),
             })
 
         return chunks
