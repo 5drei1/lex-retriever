@@ -64,10 +64,22 @@ _DEFAULT_ACTIVE = ["BGB", "HGB", "GMBHG", "GEWO", "BDSG_2018"]
 
 # Namespace used in GII XML files
 _NS = {"ns": "http://www.juris.de/jportal/namespace/types/de/documentTypes/norm/1.0.0"}
+_INDEXABLE_ENBEZ_RE = re.compile(r"^(?:§{1,2}|Art\.?)\s*[\dIVXLCM]", re.IGNORECASE)
 
 
 def _xml_zip_url(slug: str) -> str:
     return f"https://www.gesetze-im-internet.de/{slug}/xml.zip"
+
+
+def _paragraph_source_slug(paragraph: str) -> str:
+    """Build a stable, paragraph-specific URI slug for source attribution."""
+    cleaned = re.sub(r"\s+", "-", paragraph.strip().lower())
+    return re.sub(r"[^a-z0-9\-§äöüß().]", "", cleaned)
+
+
+def _is_indexable_enbez(enbez: str) -> bool:
+    """Only index real paragraph/article identifiers from GII XML metadata."""
+    return bool(_INDEXABLE_ENBEZ_RE.match((enbez or "").strip()))
 
 
 def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
@@ -78,11 +90,16 @@ def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
         return []
 
     chunks = []
-    for norm in root.findall(".//norm", _NS):
+    norms = root.findall(".//ns:norm", _NS) or root.findall(".//norm")
+    for norm in norms:
         enbez = norm.findtext("metadaten/enbez", default="", namespaces=_NS) or ""
         titel = norm.findtext("metadaten/titel", default="", namespaces=_NS) or ""
 
-        paragraph = enbez.strip()
+        enbez = enbez.strip()
+        if not _is_indexable_enbez(enbez):
+            continue
+
+        paragraph = enbez
         if titel:
             paragraph = f"{paragraph} ({titel.strip()})" if paragraph else titel.strip()
 
@@ -93,12 +110,14 @@ def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
         else:
             text = re.sub(r"\s+", " ", " ".join(norm.itertext())).strip()
 
-        # Skip malformed/empty norm entries instead of indexing an unknown fallback.
-        if text and paragraph:
+        # Skip malformed/empty norm entries instead of indexing unknown fallbacks.
+        if text:
             chunks.append({
                 "paragraph": paragraph,
                 "text": text,
-                "source": f"gesetze-im-internet.de/{law_code}",
+                "source": (
+                    f"gesetze-im-internet.de/{law_code}/{_paragraph_source_slug(paragraph)}"
+                ),
             })
 
     return chunks
@@ -140,9 +159,16 @@ class GesetzImInternetProvider(LawProvider):
         return chunks
 
     def fetch_text(self, ref_id: str, paragraph: str) -> str:
-        # ref_id format: "gesetze-im-internet.de/{LAW_CODE}"
+        # ref_id formats supported:
+        # - "gesetze-im-internet.de/{LAW_CODE}" (legacy)
+        # - "gesetze-im-internet.de/{LAW_CODE}/{paragraph-slug}" (paragraph-specific)
         try:
-            law_code = ref_id.split("/")[-1]
+            parts = ref_id.split("/")
+            if "gesetze-im-internet.de" in parts:
+                base_idx = parts.index("gesetze-im-internet.de")
+                law_code = parts[base_idx + 1]
+            else:
+                law_code = parts[-1]
             for chunk in self.fetch(law_code):
                 if chunk["paragraph"] == paragraph:
                     return chunk["text"]

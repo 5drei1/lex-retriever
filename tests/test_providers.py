@@ -88,6 +88,46 @@ class TestGesetzImInternetProvider:
         p = GesetzImInternetProvider()
         assert p.name == "gesetze-im-internet"
 
+    def test_parse_gii_xml_emits_paragraph_specific_sources(self):
+        xml = b"""<?xml version="1.0"?>
+<dokumente>
+  <norm>
+    <metadaten>
+      <enbez>&#167; 1</enbez>
+      <titel>Anwendungsbereich</titel>
+    </metadaten>
+    <textdaten><text><Content>Text 1</Content></text></textdaten>
+  </norm>
+  <norm>
+    <metadaten>
+      <enbez>&#167; 2</enbez>
+      <titel>Begriffe</titel>
+    </metadaten>
+    <textdaten><text><Content>Text 2</Content></text></textdaten>
+  </norm>
+</dokumente>"""
+        chunks = _parse_gii_xml(xml, "BGB")
+        assert len(chunks) == 2
+        assert chunks[0]["source"].startswith("gesetze-im-internet.de/BGB/")
+        assert chunks[1]["source"].startswith("gesetze-im-internet.de/BGB/")
+        assert chunks[0]["source"] != chunks[1]["source"]
+
+    def test_fetch_text_accepts_legacy_and_paragraph_specific_ref_id(self, monkeypatch):
+        p = GesetzImInternetProvider()
+        chunks = [{"paragraph": "§ 242", "text": "Treu und Glauben", "source": "x"}]
+
+        def fake_fetch(law_code: str) -> list[dict]:
+            assert law_code == "BGB"
+            return chunks
+
+        monkeypatch.setattr(p, "fetch", fake_fetch)
+
+        assert p.fetch_text("gesetze-im-internet.de/BGB", "§ 242") == "Treu und Glauben"
+        assert (
+            p.fetch_text("gesetze-im-internet.de/BGB/§-242-(treu-und-glauben)", "§ 242")
+            == "Treu und Glauben"
+        )
+
     def test_parse_gii_xml_list_before_backreference(self):
         """Regression: § 434 Abs. 2 — numbered list must precede the back-reference sentence."""
         xml = b"""<?xml version="1.0"?>
