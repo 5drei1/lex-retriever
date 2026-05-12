@@ -101,9 +101,10 @@ def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
             text = " ".join(norm.itertext()).strip()
             text = re.sub(r"\s+", " ", text)
 
-        if text:
+        # Skip malformed/empty norm entries instead of indexing an unknown fallback.
+        if text and paragraph:
             chunks.append({
-                "paragraph": paragraph or "§ (unbekannt)",
+                "paragraph": paragraph,
                 "text": text,
                 "source": f"gesetze-im-internet.de/{law_code}",
             })
