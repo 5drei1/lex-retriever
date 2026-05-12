@@ -65,6 +65,11 @@ _DEFAULT_ACTIVE = ["BGB", "HGB", "GMBHG", "GEWO", "BDSG_2018"]
 # Namespace used in GII XML files
 _NS = {"ns": "http://www.juris.de/jportal/namespace/types/de/documentTypes/norm/1.0.0"}
 
+# Only index entries that carry a real normative designator (§ 1, §§ 1-3, Art. 1, Art 20, or
+# purely numeric like "1" or "1a"). Structural entries like "Inhaltsübersicht", "Präambel",
+# or "Anlage 1" do not match and are excluded.
+_NORM_ENBEZ_RE = re.compile(r"^(?:§§?\s*\d|Art\.?\s*\d|\d)", re.IGNORECASE)
+
 
 def _xml_zip_url(slug: str) -> str:
     return f"https://www.gesetze-im-internet.de/{slug}/xml.zip"
@@ -100,9 +105,10 @@ def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
         else:
             text = re.sub(r"\s+", " ", " ".join(norm.itertext())).strip()
 
-        # Skip malformed/empty norm entries instead of indexing unknown fallbacks.
-        # Require enbez to avoid indexing pure title headings.
-        if text and enbez.strip():
+        # Only index norms with a real normative designator (§ N, Art. N, or numeric).
+        # Structural entries like "Inhaltsübersicht" or "Präambel" have non-empty enbez
+        # but are not law paragraphs.
+        if text and _NORM_ENBEZ_RE.match(enbez.strip()):
             chunks.append({
                 "paragraph": paragraph,
                 "text": text,
