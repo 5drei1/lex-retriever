@@ -12,7 +12,8 @@ import re
 from typing import Any
 
 # Matches chunked paragraph keys produced by the indexer: "§ 123 [1/2]"
-_CHUNK_RE = re.compile(r"^(.*) \[(\d+)/(\d+)\]$")
+_CHUNK_RE = re.compile(r"^(.*)\s+\[(\d+)/(\d+)\]$")
+_WS_RE = re.compile(r"\s+")
 
 import lancedb
 
@@ -39,7 +40,8 @@ def _build_text_index(law_code: str) -> dict[str, str]:
     """Map paragraph key → text for all chunks of a law."""
     index: dict[str, str] = {}
     for chunk in _fetch_law_chunks(law_code):
-        index[chunk["paragraph"]] = chunk["text"]
+        key = _WS_RE.sub(" ", chunk["paragraph"]).strip()
+        index[key] = chunk["text"]
     return index
 
 
@@ -76,12 +78,21 @@ class LexRetriever:
         if law_code not in self._text_cache:
             self._text_cache[law_code] = _build_text_index(law_code)
         cache = self._text_cache[law_code]
-        text = cache.get(paragraph, "")
+        normalized_paragraph = _WS_RE.sub(" ", paragraph).strip()
+        text = cache.get(normalized_paragraph, "")
+        if not text:
+            # Backward-compatible fallback for already-populated caches that used
+            # unnormalized keys (e.g. keys containing newlines).
+            normalized_cache = {_WS_RE.sub(" ", k).strip(): v for k, v in cache.items()}
+            if normalized_cache != cache:
+                self._text_cache[law_code] = normalized_cache
+                cache = normalized_cache
+            text = cache.get(normalized_paragraph, "")
         if text:
             return text
         # Providers return base keys (e.g. "§ 123") but the indexer stores chunked
         # keys (e.g. "§ 123 [1/2]"). Re-apply the same chunking to find the sub-chunk.
-        m = _CHUNK_RE.match(paragraph)
+        m = _CHUNK_RE.match(normalized_paragraph)
         if m:
             base, chunk_idx = m.group(1), int(m.group(2)) - 1
             base_text = cache.get(base, "")

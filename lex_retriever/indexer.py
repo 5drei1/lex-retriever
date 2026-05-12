@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 
 import lancedb
 
@@ -17,6 +18,12 @@ LANCE_PATH = os.environ.get("LANCE_PATH", os.path.join(os.path.dirname(__file__)
 TABLE_NAME = "german_law"
 _CHUNK_MAX_WORDS = 100
 _CHUNK_OVERLAP_WORDS = 20
+_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_paragraph(paragraph: str) -> str:
+    """Collapse internal whitespace so paragraph keys are stable."""
+    return _WS_RE.sub(" ", paragraph).strip()
 
 
 def _chunk_id(law_code: str, paragraph: str, idx: int) -> str:
@@ -79,10 +86,11 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
         # Use chunk text only for embedding — text is NOT stored in LanceDB.
         # ref_id stores the ELI/CELEX/source identifier for on-demand text retrieval.
         sub_chunks = chunk_text(chunk["text"])
+        base_paragraph = _normalize_paragraph(chunk["paragraph"])
         for idx, sub_text in enumerate(sub_chunks):
             paragraph = (
-                chunk["paragraph"] if len(sub_chunks) == 1
-                else f"{chunk['paragraph']} [{idx + 1}/{len(sub_chunks)}]"
+                base_paragraph if len(sub_chunks) == 1
+                else f"{base_paragraph} [{idx + 1}/{len(sub_chunks)}]"
             )
             indexed_chunks.append({
                 "id":        _chunk_id(law_code, paragraph, idx),

@@ -89,6 +89,20 @@ class TestGetTextChunkedFallback:
         result = r._get_text("BGB", "§ 100 [2/2]")
         assert result != "", "Expected non-empty text for [2/2] chunked key"
 
+    def test_chunked_key_matches_when_paragraph_whitespace_differs(self):
+        """Paragraph keys with newlines/multi-space must match normalized chunked lookups."""
+        r = _make_retriever()
+        r._text_cache["BGB"] = {
+            "§ 281 (Schadensersatz statt der Leistung wegen nicht oder nicht wie geschuldet\n"
+            "erbrachter Leistung)": _LONG_TEXT
+        }
+        result = r._get_text(
+            "BGB",
+            "§ 281 (Schadensersatz statt der Leistung wegen nicht oder nicht wie geschuldet "
+            "erbrachter Leistung) [1/2]",
+        )
+        assert result != "", "Expected non-empty text despite whitespace differences in paragraph key"
+
     def test_chunked_chunks_are_different(self):
         """[1/2] and [2/2] should return different text (overlap is partial, not identical)."""
         r = _make_retriever()
