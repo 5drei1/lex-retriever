@@ -64,7 +64,6 @@ _DEFAULT_ACTIVE = ["BGB", "HGB", "GMBHG", "GEWO", "BDSG_2018"]
 
 # Namespace used in GII XML files
 _NS = {"ns": "http://www.juris.de/jportal/namespace/types/de/documentTypes/norm/1.0.0"}
-_INDEXABLE_ENBEZ_RE = re.compile(r"^(?:§{1,2}|Art\.?)\s*[\dIVXLCM]", re.IGNORECASE)
 
 
 def _xml_zip_url(slug: str) -> str:
@@ -75,11 +74,6 @@ def _paragraph_source_slug(paragraph: str) -> str:
     """Build a stable, paragraph-specific URI slug for source attribution."""
     cleaned = re.sub(r"\s+", "-", paragraph.strip().lower())
     return re.sub(r"[^a-z0-9\-§äöüß().]", "", cleaned)
-
-
-def _is_indexable_enbez(enbez: str) -> bool:
-    """Only index real paragraph/article identifiers from GII XML metadata."""
-    return bool(_INDEXABLE_ENBEZ_RE.match((enbez or "").strip()))
 
 
 def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
@@ -95,11 +89,7 @@ def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
         enbez = norm.findtext("metadaten/enbez", default="", namespaces=_NS) or ""
         titel = norm.findtext("metadaten/titel", default="", namespaces=_NS) or ""
 
-        enbez = enbez.strip()
-        if not _is_indexable_enbez(enbez):
-            continue
-
-        paragraph = enbez
+        paragraph = enbez.strip()
         if titel:
             paragraph = f"{paragraph} ({titel.strip()})" if paragraph else titel.strip()
 
@@ -111,7 +101,8 @@ def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
             text = re.sub(r"\s+", " ", " ".join(norm.itertext())).strip()
 
         # Skip malformed/empty norm entries instead of indexing unknown fallbacks.
-        if text:
+        # Require enbez to avoid indexing pure title headings.
+        if text and enbez.strip():
             chunks.append({
                 "paragraph": paragraph,
                 "text": text,

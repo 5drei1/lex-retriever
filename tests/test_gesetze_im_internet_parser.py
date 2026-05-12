@@ -1,4 +1,4 @@
-from lex_retriever.providers.gesetze_im_internet import _is_indexable_enbez, _parse_gii_xml
+from lex_retriever.providers.gesetze_im_internet import _parse_gii_xml
 
 
 def test_parse_gii_xml_skips_norm_without_paragraph_identifier():
@@ -35,16 +35,15 @@ def test_parse_gii_xml_skips_norm_without_paragraph_identifier():
     assert "gueltiger Normtext" in chunks[0]["text"]
 
 
-def test_parse_gii_xml_skips_non_normative_enbez_values():
+def test_parse_gii_xml_skips_empty_enbez_even_when_title_exists():
     xml = """<?xml version="1.0" encoding="UTF-8"?>
 <dokument>
   <norm>
-    <metadaten><enbez>Inhaltsuebersicht</enbez></metadaten>
+    <metadaten>
+      <enbez> </enbez>
+      <titel>Inhaltsuebersicht</titel>
+    </metadaten>
     <textdaten><text><Content>Nur Ueberschrift.</Content></text></textdaten>
-  </norm>
-  <norm>
-    <metadaten><enbez>Anlage 1</enbez></metadaten>
-    <textdaten><text><Content>Anlage ohne Paragraph.</Content></text></textdaten>
   </norm>
   <norm>
     <metadaten><enbez>Art. 3</enbez></metadaten>
@@ -54,13 +53,3 @@ def test_parse_gii_xml_skips_non_normative_enbez_values():
 """.encode("utf-8")
     chunks = _parse_gii_xml(xml, "GG")
     assert [c["paragraph"] for c in chunks] == ["Art. 3"]
-
-
-def test_is_indexable_enbez_accepts_only_paragraph_or_article_patterns():
-    assert _is_indexable_enbez("§ 1")
-    assert _is_indexable_enbez("§§ 80")
-    assert _is_indexable_enbez("Art. 3")
-    assert _is_indexable_enbez("art 20")
-    assert not _is_indexable_enbez("")
-    assert not _is_indexable_enbez("Inhaltsuebersicht")
-    assert not _is_indexable_enbez("Anlage 1")
