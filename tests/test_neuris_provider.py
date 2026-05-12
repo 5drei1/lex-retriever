@@ -239,6 +239,24 @@ class TestNeuRISProviderFetch:
             chunks = provider.fetch("TESTG")
         assert chunks == []
 
+    def test_fetch_skips_parts_when_neuris_model_raises_keyerror_for_eli(
+        self,
+        provider: NeuRISProvider,
+        mock_transport: MockTransport,
+    ):
+        _register_law(mock_transport)
+
+        class _BrokenPart:
+            def __getattr__(self, name: str):
+                if name == "eli":
+                    raise KeyError("eli")
+                raise AttributeError(name)
+
+        full_law = SimpleNamespace(has_part=[_BrokenPart()])
+        with patch.object(provider._client, "get_legislation_by_eli", return_value=full_law):
+            chunks = provider.fetch("TESTG")
+        assert chunks == []
+
 
 # ── Tests: NeuRISProvider.is_available() ─────────────────────────────────────
 

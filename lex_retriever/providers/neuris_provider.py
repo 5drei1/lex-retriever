@@ -80,11 +80,27 @@ def _part_ref_id(part: Any, raw: dict[str, Any] | None = None) -> str | None:
             return raw_id.strip()
 
     for attr in ("eli", "legislation_identifier", "legislation_work_identifier"):
-        value = getattr(part, attr, None)
+        try:
+            value = getattr(part, attr, None)
+        except Exception:
+            value = None
         if isinstance(value, str) and value.strip():
             return value.strip()
 
     return None
+
+
+def _part_iter(full_law: Any) -> list[Any]:
+    """Return legislation parts while tolerating unstable model implementations."""
+    try:
+        parts = getattr(full_law, "has_part", None)
+    except Exception:
+        parts = None
+
+    if parts is None and isinstance(full_law, dict):
+        parts = full_law.get("hasPart") or full_law.get("has_part")
+
+    return list(parts or [])
 
 
 class NeuRISProvider(LawProvider):
@@ -176,7 +192,7 @@ class NeuRISProvider(LawProvider):
 
         # Step 3: for each part, fetch raw data and extract text
         chunks: list[dict] = []
-        for part in full_law.has_part:
+        for part in _part_iter(full_law):
             fetch_ref = _part_ref_id(part)
             if not fetch_ref:
                 continue
