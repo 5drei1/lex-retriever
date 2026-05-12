@@ -47,6 +47,17 @@ class NeuRISProvider(LawProvider):
     Uses neuris-python as the HTTP client. The `source` field in returned
     chunks is the ELI (European Legislation Identifier) of the law part.
 
+    Coverage scope:
+        NeuRIS (testphase.rechtsinformationen.bund.de) covers only laws
+        published through the digital Bundesgesetzblatt (BGBl) system.
+        Classical German codifications that predate BGBl digitisation — such
+        as BGB, HGB, or StGB — are **not** available here.  Use
+        ``GesetzImInternetProvider`` for those laws instead.
+
+        ``supported_laws = []`` is intentional: this is a dynamic provider
+        that calls ``is_available()`` against the live API rather than
+        maintaining a static allowlist.
+
     Args:
         transport: Optional NeuRISTransport for testing/overriding.
                    Defaults to TestphaseTransport (live testphase API).
