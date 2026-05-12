@@ -32,6 +32,9 @@ class _MockTransport(NeuRISTransport):
                 return value
         raise KeyError(f"No mock response for {path!r}")
 
+    def get_raw(self, path: str, accept: str, params: dict[str, Any] | None = None) -> bytes:
+        raise NotImplementedError
+
     def close(self) -> None:
         pass
 
