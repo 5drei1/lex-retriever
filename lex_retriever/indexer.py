@@ -6,6 +6,7 @@ import hashlib
 import logging
 import os
 import re
+import shutil
 
 import lancedb
 
@@ -117,6 +118,13 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
             for start in range(0, len(rows), batch_size):
                 table.add(rows[start:start + batch_size])
         else:
+            # Remove any stale .lance directory left over from a prior drop_table().
+            # LanceDB's _versions/ manifest counter does not reset on table deletion,
+            # so reinheriting the old directory causes version-number wrap-around
+            # (values near UINT64_MAX) that makes subsequent queries return 0 rows.
+            lance_dir = os.path.join(LANCE_PATH, f"{TABLE_NAME}.lance")
+            if os.path.isdir(lance_dir):
+                shutil.rmtree(lance_dir)
             table = db.create_table(TABLE_NAME, data=rows[:batch_size])
             for start in range(batch_size, len(rows), batch_size):
                 table.add(rows[start:start + batch_size])

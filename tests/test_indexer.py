@@ -2,7 +2,8 @@
 
 import hashlib
 import logging
-from unittest.mock import MagicMock, patch
+import os
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -188,6 +189,78 @@ class TestIndexLawSchema:
 
         assert embedded_texts, "embedder never called"
         assert "Gesetzestext" in embedded_texts[0]
+
+
+class TestIndexLawStaleLanceDir:
+    """Regression: stale .lance directory after drop_table() must be removed before create_table()."""
+
+    def _make_provider(self, chunks):
+        class _FakeProvider:
+            name = "fake"
+            def is_available(self, code): return True
+            def fetch(self, code): return chunks
+        return _FakeProvider()
+
+    def test_stale_lance_dir_is_removed_before_create(self, tmp_path):
+        from lex_retriever.indexer import TABLE_NAME, index_law
+
+        chunks = [{"paragraph": "§ 1", "text": "Text.", "source": "src/TLAW"}]
+
+        class _Embedder:
+            def embed(self, texts): return [[0.0] * 4 for _ in texts]
+
+        # Simulate stale .lance directory left over from a prior drop_table()
+        stale_dir = tmp_path / f"{TABLE_NAME}.lance"
+        stale_dir.mkdir()
+
+        mock_db = MagicMock()
+        mock_db.table_names.return_value = []
+        mock_db.create_table.return_value = MagicMock()
+
+        removed: list[str] = []
+
+        def _rmtree(path, *args, **kwargs):
+            removed.append(str(path))
+
+        with patch("lex_retriever.indexer.lancedb.connect", return_value=mock_db), \
+             patch("lex_retriever.indexer.get_embedding_provider", return_value=_Embedder()), \
+             patch("lex_retriever.indexer.get_providers_for_law",
+                   return_value=[self._make_provider(chunks)]), \
+             patch("lex_retriever.indexer.os.makedirs"), \
+             patch("lex_retriever.indexer.LANCE_PATH", str(tmp_path)), \
+             patch("lex_retriever.indexer.shutil.rmtree", side_effect=_rmtree):
+            index_law("TLAW")
+
+        assert removed, "shutil.rmtree was not called for the stale lance directory"
+        assert any(str(stale_dir) in p for p in removed)
+
+    def test_no_rmtree_when_lance_dir_absent(self, tmp_path):
+        from lex_retriever.indexer import index_law
+
+        chunks = [{"paragraph": "§ 1", "text": "Text.", "source": "src/TLAW"}]
+
+        class _Embedder:
+            def embed(self, texts): return [[0.0] * 4 for _ in texts]
+
+        mock_db = MagicMock()
+        mock_db.table_names.return_value = []
+        mock_db.create_table.return_value = MagicMock()
+
+        removed: list[str] = []
+
+        def _rmtree(path, *args, **kwargs):
+            removed.append(str(path))
+
+        with patch("lex_retriever.indexer.lancedb.connect", return_value=mock_db), \
+             patch("lex_retriever.indexer.get_embedding_provider", return_value=_Embedder()), \
+             patch("lex_retriever.indexer.get_providers_for_law",
+                   return_value=[self._make_provider(chunks)]), \
+             patch("lex_retriever.indexer.os.makedirs"), \
+             patch("lex_retriever.indexer.LANCE_PATH", str(tmp_path)), \
+             patch("lex_retriever.indexer.shutil.rmtree", side_effect=_rmtree):
+            index_law("TLAW")
+
+        assert not removed, "shutil.rmtree called unexpectedly when no stale dir exists"
 
 
 # ---------------------------------------------------------------------------
