@@ -182,6 +182,24 @@ class TestOnDemandTextFetching:
 
         assert results
         assert results[0].get("ref_id") == "gesetze-im-internet.de/TESTLAW"
+        assert results[0].get("source") == "gesetze-im-internet.de/TESTLAW"
+
+    def test_search_result_ref_id_falls_back_to_metadata_source(self):
+        from unittest.mock import patch
+
+        rows = [{"law": "TESTLAW", "paragraph": "§ 2",
+                 "metadata": {"source": "gesetze-im-internet.de/TESTLAW"}, "_distance": 0.1}]
+        fake_chunks = [{"paragraph": "§ 2", "text": "Text §2", "source": "x"}]
+
+        r = self._make_retriever_with_table(rows)
+
+        with patch("lex_retriever.retriever.expand_query", return_value="test"), \
+             patch("lex_retriever.retriever._fetch_law_chunks", return_value=fake_chunks):
+            results = r.search("test", laws=["TESTLAW"])
+
+        assert results
+        assert results[0].get("ref_id") == "gesetze-im-internet.de/TESTLAW"
+        assert results[0].get("source") == "gesetze-im-internet.de/TESTLAW"
 
     def test_text_cached_per_law(self):
         """_fetch_law_chunks should only be called once per law, even for multiple results."""

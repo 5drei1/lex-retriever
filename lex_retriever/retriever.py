@@ -43,6 +43,19 @@ def _build_text_index(law_code: str) -> dict[str, str]:
     return index
 
 
+def _resolve_ref_id(row: dict[str, Any]) -> str:
+    """Resolve source identifier from row-level or metadata fields."""
+    direct = row.get("ref_id") or row.get("source")
+    if direct:
+        return str(direct)
+    metadata = row.get("metadata")
+    if isinstance(metadata, dict):
+        meta_source = metadata.get("source") or metadata.get("ref_id")
+        if meta_source:
+            return str(meta_source)
+    return ""
+
+
 class LexRetriever:
     def __init__(self, lance_path: str = LANCE_PATH, embedding_config: dict | None = None):
         self._lance_path = lance_path
@@ -101,11 +114,13 @@ class LexRetriever:
             law = r["law"]
             paragraph = r["paragraph"]
             text = self._get_text(law, paragraph)
+            ref_id = _resolve_ref_id(r)
             output.append({
                 "law":            law,
                 "paragraph":      paragraph,
                 "text":           text,
-                "ref_id":         r.get("ref_id", ""),
+                "ref_id":         ref_id,
+                "source":         ref_id,
                 "score":          round(1.0 - (r["_distance"] / 2), 4),
                 "original_query": query,
             })
