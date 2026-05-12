@@ -3,7 +3,7 @@
 import pytest
 
 from lex_retriever.providers.base import LawProvider
-from lex_retriever.providers.gesetze_im_internet import GesetzImInternetProvider
+from lex_retriever.providers.gesetze_im_internet import GesetzImInternetProvider, _parse_gii_xml
 from lex_retriever.providers import REGISTRY, get_providers_for_law, all_supported_laws
 
 
@@ -87,6 +87,78 @@ class TestGesetzImInternetProvider:
     def test_name(self):
         p = GesetzImInternetProvider()
         assert p.name == "gesetze-im-internet"
+
+    def test_parse_gii_xml_list_before_backreference(self):
+        """Regression: § 434 Abs. 2 — numbered list must precede the back-reference sentence."""
+        xml = b"""<?xml version="1.0"?>
+<dokumente>
+  <norm>
+    <metadaten>
+      <enbez>&#167; 434</enbez>
+      <titel>Sachmangel</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>(2) Die Sache entspricht den subjektiven Anforderungen, wenn sie
+            <DL>
+              <DT>1.</DT><DD><LA>die vereinbarte Beschaffenheit hat,</LA></DD>
+              <DT>2.</DT><DD><LA>sich f&#252;r die nach dem Vertrag vorausgesetzte Verwendung eignet und</LA></DD>
+              <DT>3.</DT><DD><LA>mit dem vereinbarten Zubeh&#246;r &#252;bergeben wird.</LA></DD>
+            </DL>
+            Zu der Beschaffenheit nach Satz 1 Nummer 1 geh&#246;ren Art, Menge, Qualit&#228;t, Funktionalit&#228;t.
+          </P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+</dokumente>"""
+        chunks = _parse_gii_xml(xml, "BGB")
+        assert len(chunks) == 1
+        text = chunks[0]["text"]
+
+        pos_list = text.index("die vereinbarte Beschaffenheit hat")
+        pos_ref = text.index("Zu der Beschaffenheit nach Satz 1 Nummer 1")
+        assert pos_list < pos_ref, (
+            f"Numbered list must precede back-reference sentence; "
+            f"pos_list={pos_list}, pos_ref={pos_ref}\nFull text: {text!r}"
+        )
+
+    def test_parse_gii_xml_abs3_list_before_backreference(self):
+        """Regression: § 434 Abs. 3 — numbered list must precede the back-reference sentence."""
+        xml = b"""<?xml version="1.0"?>
+<dokumente>
+  <norm>
+    <metadaten>
+      <enbez>&#167; 434</enbez>
+      <titel>Sachmangel</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>(3) Soweit nicht wirksam etwas anderes vereinbart wurde, entspricht die Sache den objektiven Anforderungen, wenn sie
+            <DL Type="arabic">
+              <DT>1.</DT><DD Font="normal"><LA>sich f&#252;r die gew&#246;hnliche Verwendung eignet,</LA></DD>
+              <DT>2.</DT><DD Font="normal"><LA>eine &#252;bliche Beschaffenheit aufweist und</LA></DD>
+              <DT>3.</DT><DD Font="normal"><LA>mit dem Zubeh&#246;r &#252;bergeben wird.</LA></DD>
+            </DL>
+            Zu der &#252;blichen Beschaffenheit nach Satz 1 Nummer 2 geh&#246;ren Menge, Qualit&#228;t und sonstige Merkmale der Sache.
+          </P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+</dokumente>"""
+        chunks = _parse_gii_xml(xml, "BGB")
+        assert len(chunks) == 1
+        text = chunks[0]["text"]
+
+        pos_list = text.index("sich für die gewöhnliche Verwendung eignet")
+        pos_ref = text.index("Zu der üblichen Beschaffenheit nach Satz 1 Nummer 2")
+        assert pos_list < pos_ref, (
+            f"Numbered list must precede back-reference sentence in Abs. 3; "
+            f"pos_list={pos_list}, pos_ref={pos_ref}\nFull text: {text!r}"
+        )
 
 
 # ---------------------------------------------------------------------------

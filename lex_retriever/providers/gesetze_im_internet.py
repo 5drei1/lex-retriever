@@ -86,20 +86,12 @@ def _parse_gii_xml(xml_bytes: bytes, law_code: str) -> list[dict]:
         if titel:
             paragraph = f"{paragraph} ({titel.strip()})" if paragraph else titel.strip()
 
-        text_parts = []
-        for content in norm.findall(".//Content", _NS):
-            if content.text:
-                text_parts.append(content.text.strip())
-        for elem in norm.findall(".//textdaten//"):
-            if elem.text and elem.text.strip():
-                text_parts.append(elem.text.strip())
-            if elem.tail and elem.tail.strip():
-                text_parts.append(elem.tail.strip())
-
-        text = " ".join(text_parts).strip()
-        if not text:
-            text = " ".join(norm.itertext()).strip()
-            text = re.sub(r"\s+", " ", text)
+        textdaten = norm.find(".//textdaten")
+        if textdaten is not None:
+            text_parts = [t.strip() for t in textdaten.itertext() if t and t.strip()]
+            text = re.sub(r"\s+", " ", " ".join(text_parts)).strip()
+        else:
+            text = re.sub(r"\s+", " ", " ".join(norm.itertext())).strip()
 
         # Skip malformed/empty norm entries instead of indexing an unknown fallback.
         if text and paragraph:
