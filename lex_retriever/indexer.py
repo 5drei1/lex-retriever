@@ -66,7 +66,10 @@ def index_law(law_code: str, force: bool = False, embedding_config: dict | None 
 
     raw_chunks: list[dict] = []
     for provider in providers:
-        raw_chunks.extend(provider.fetch(law_code))
+        try:
+            raw_chunks.extend(provider.fetch(law_code))
+        except Exception as exc:
+            logger.warning("Provider %s failed for %s: %s", provider.name, law_code, exc)
 
     if not raw_chunks:
         return 0
