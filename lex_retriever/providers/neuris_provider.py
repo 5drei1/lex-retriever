@@ -72,6 +72,21 @@ def _extract_text(raw: dict[str, Any]) -> str:
     return (raw.get("officialLongTitle") or "").strip()
 
 
+def _part_ref_id(part: Any, raw: dict[str, Any] | None = None) -> str | None:
+    """Return the most specific ELI/identifier for a legislation part."""
+    if raw:
+        raw_id = raw.get("legislationIdentifier")
+        if isinstance(raw_id, str) and raw_id.strip():
+            return raw_id.strip()
+
+    for attr in ("eli", "legislation_identifier", "legislation_work_identifier"):
+        value = getattr(part, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return None
+
+
 class NeuRISProvider(LawProvider):
     """Fetches German federal legislation from the NeuRIS testphase API.
 
@@ -162,11 +177,11 @@ class NeuRISProvider(LawProvider):
         # Step 3: for each part, fetch raw data and extract text
         chunks: list[dict] = []
         for part in full_law.has_part:
-            part_eli = getattr(part, "eli", None)
-            if not part_eli:
+            fetch_ref = _part_ref_id(part)
+            if not fetch_ref:
                 continue
             try:
-                raw = self._transport.get(f"/legislation/eli/{_eli_path(part_eli)}")
+                raw = self._transport.get(f"/legislation/eli/{_eli_path(fetch_ref)}")
             except NeuRISError:
                 continue
 
@@ -174,15 +189,17 @@ class NeuRISProvider(LawProvider):
             if not text:
                 continue
 
+            source_ref = _part_ref_id(part, raw=raw) or fetch_ref
+
             # Use the last ELI segment as the paragraph identifier
-            paragraph = raw.get("name") or raw.get("abbreviation") or part.eli.split("/")[-1]
+            paragraph = raw.get("name") or raw.get("abbreviation") or source_ref.split("/")[-1]
             if not raw.get("name") and not raw.get("abbreviation"):
-                paragraph = part_eli.split("/")[-1]
+                paragraph = source_ref.split("/")[-1]
 
             chunks.append({
                 "paragraph": str(paragraph),
                 "text": text,
-                "source": _normalize_eli_url(part_eli),
+                "source": _normalize_eli_url(source_ref),
             })
 
         return chunks

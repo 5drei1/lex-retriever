@@ -153,6 +153,49 @@ class TestNeuRISProviderFetch:
         assert "Art. 1" in labels
         assert "Art. 2" in labels
 
+    def test_fetch_prefers_part_legislation_identifier_for_source(
+        self,
+        provider: NeuRISProvider,
+        mock_transport: MockTransport,
+    ):
+        parts = [
+            {"eli": "eli/bgbl-1/2024/testgesetz/2024-01-01/1/deu/regelungstext-1/art-1"},
+            {"eli": "eli/bgbl-1/2024/testgesetz/2024-01-01/1/deu/regelungstext-1/art-2"},
+        ]
+        law_list = _legislation_list("TESTG", "Testgesetz", "eli/bgbl-1/2024/testgesetz", parts)
+        mock_transport.register("/legislation", law_list)
+        mock_transport.register(
+            "/legislation/eli/bgbl-1/2024/testgesetz/2024-01-01/1/deu/regelungstext-1",
+            law_list["member"][0]["item"],
+        )
+        mock_transport.register(
+            "/legislation/eli/bgbl-1/2024/testgesetz/2024-01-01/1/deu/regelungstext-1/art-1",
+            {
+                "name": "Art. 1",
+                "legislationIdentifier": "eli/bgbl-1/2024/testgesetz/2024-01-01/1/deu/regelungstext-1/art-1/abs-1",
+                "text": "Paragraph one text.",
+            },
+        )
+        mock_transport.register(
+            "/legislation/eli/bgbl-1/2024/testgesetz/2024-01-01/1/deu/regelungstext-1/art-2",
+            {
+                "name": "Art. 2",
+                "legislationIdentifier": "eli/bgbl-1/2024/testgesetz/2024-01-01/1/deu/regelungstext-1/art-2/abs-1",
+                "text": "Paragraph two text.",
+            },
+        )
+
+        chunks = provider.fetch("TESTG")
+        sources = {c["source"] for c in chunks}
+        assert (
+            "https://testphase.rechtsinformationen.bund.de/eli/bgbl-1/2024/testgesetz/2024-01-01/1/deu/regelungstext-1/art-1/abs-1"
+            in sources
+        )
+        assert (
+            "https://testphase.rechtsinformationen.bund.de/eli/bgbl-1/2024/testgesetz/2024-01-01/1/deu/regelungstext-1/art-2/abs-1"
+            in sources
+        )
+
     def test_fetch_case_insensitive_code(self, provider: NeuRISProvider, mock_transport: MockTransport):
         _register_law(mock_transport)
         chunks_upper = provider.fetch("TESTG")
